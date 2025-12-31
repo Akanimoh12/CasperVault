@@ -121,7 +121,7 @@ impl LstCspr {
     pub fn mint(&mut self, to: Address, amount: U512) {
         // Only minter can mint
         let caller = self.env().caller();
-        let minter = self.minter.get_or_revert(&self.env());
+        let minter = self.minter.get().unwrap_or_else(|| self.env().revert(TokenError::InsufficientTokenBalance));
         if caller != minter {
             self.env().revert(TokenError::InsufficientTokenBalance); // Use generic error
         }
@@ -147,7 +147,7 @@ impl LstCspr {
     pub fn burn(&mut self, from: Address, amount: U512) {
         // Only minter can burn
         let caller = self.env().caller();
-        let minter = self.minter.get_or_revert(&self.env());
+        let minter = self.minter.get().unwrap_or_else(|| self.env().revert(TokenError::InsufficientTokenBalance));
         if caller != minter {
             self.env().revert(TokenError::InsufficientTokenBalance); // Use generic error
         }

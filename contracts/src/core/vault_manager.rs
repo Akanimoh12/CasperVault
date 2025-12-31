@@ -8,7 +8,7 @@ use crate::utils::{AccessControl, ReentrancyGuard, Pausable};
 
 /// Withdrawal request structure for time-locked withdrawals
 /// Note: Odra automatically implements CLTyped, ToBytes, FromBytes for structs with basic derives
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, odra::OdraType)]
 pub struct WithdrawalRequest {
     pub user: Address,
     pub shares: U512,
@@ -20,7 +20,7 @@ pub struct WithdrawalRequest {
 
 /// User deposit tracking for performance fee calculation  
 /// Note: Odra automatically implements CLTyped, ToBytes, FromBytes for structs with basic derives
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, odra::OdraType)]
 pub struct UserDeposit {
     pub total_deposited: U512,
     pub total_shares: U512,
@@ -70,8 +70,11 @@ pub struct VaultManager {
     /// User shares mapping (user -> shares balance)
     user_shares: Mapping<Address, U512>,
     
-    /// User deposit tracking (for performance fee calculation)
-    user_deposits: Mapping<Address, UserDeposit>,
+    /// User deposit tracking (for performance fee calculation) - flattened
+    user_total_deposited: Mapping<Address, U512>,
+    user_total_shares: Mapping<Address, U512>,
+    user_cost_basis: Mapping<Address, U512>,
+    user_last_deposit_time: Mapping<Address, u64>,
     
     
     /// cvCSPR token contract address
@@ -96,8 +99,13 @@ pub struct VaultManager {
     cv_cspr_token_address: Var<Address>,
     
     
-    /// Withdrawal requests mapping (request_id -> WithdrawalRequest)
-    withdrawal_requests: Mapping<U256, WithdrawalRequest>,
+    /// Withdrawal requests - flattened (request_id -> fields)
+    withdrawal_request_users: Mapping<U256, Address>,
+    withdrawal_request_shares: Mapping<U256, U512>,
+    withdrawal_request_assets: Mapping<U256, U512>,
+    withdrawal_request_times: Mapping<U256, u64>,
+    withdrawal_request_unlock_times: Mapping<U256, u64>,
+    withdrawal_request_completed: Mapping<U256, bool>,
     
     /// Next withdrawal request ID
     next_request_id: Var<U256>,
@@ -349,12 +357,10 @@ impl VaultManager {
         let new_user_shares = user_shares.checked_sub(shares).unwrap();
         if new_user_shares.is_zero() {
             self.user_shares.set(&caller, U512::zero());
-            self.user_deposits.set(&caller, UserDeposit {
-                cost_basis: U512::zero(),
-                total_deposited: U512::zero(),
-                total_shares: U512::zero(),
-                last_deposit_time: 0,
-            });
+            self.user_total_deposited.set(&caller, U512::zero());
+            self.user_total_shares.set(&caller, U512::zero());
+            self.user_cost_basis.set(&caller, U512::zero());
+            self.user_last_deposit_time.set(&caller, 0);
         } else {
             self.user_shares.set(&caller, new_user_shares);
         }
@@ -402,17 +408,15 @@ impl VaultManager {
         // Create withdrawal request
         let request_id = self.next_withdrawal_id.get_or_default();
         let unlock_time = self.env().get_block_time() + self.withdrawal_timelock.get_or_default();
+        let current_time = self.env().get_block_time();
         
-        let request = WithdrawalRequest {
-            user: caller,
-            shares,
-            assets_value,
-            request_time: self.env().get_block_time(),
-            unlock_time,
-            completed: false,
-        };
+        self.withdrawal_request_users.set(&request_id, caller);
+        self.withdrawal_request_shares.set(&request_id, shares);
+        self.withdrawal_request_assets.set(&request_id, assets_value);
+        self.withdrawal_request_times.set(&request_id, current_time);
+        self.withdrawal_request_unlock_times.set(&request_id, unlock_time);
+        self.withdrawal_request_completed.set(&request_id, false);
         
-        self.withdrawal_requests.set(&request_id, request);
         self.next_withdrawal_id.set(request_id + 1);
         
         // Lock user shares (don't burn yet)
@@ -440,52 +444,56 @@ impl VaultManager {
         let caller = self.env().caller();
         
         // Get request
-        let mut request = match self.withdrawal_requests.get(&request_id) {
-            Some(req) => req,
+        let request_user = match self.withdrawal_request_users.get(&request_id) {
+            Some(user) => user,
             None => {
                 self.reentrancy_guard.exit();
                 self.env().revert(VaultError::InvalidRequest);
             }
         };
         
+        let request_shares = self.withdrawal_request_shares.get(&request_id).unwrap_or(U512::zero());
+        let request_assets = self.withdrawal_request_assets.get(&request_id).unwrap_or(U512::zero());
+        let request_unlock_time = self.withdrawal_request_unlock_times.get(&request_id).unwrap_or(0);
+        let request_completed = self.withdrawal_request_completed.get(&request_id).unwrap_or(false);
+        
         // Validate request
-        if request.user != caller {
+        if request_user != caller {
             self.reentrancy_guard.exit();
             self.env().revert(VaultError::Unauthorized);
         }
         
-        if request.completed {
+        if request_completed {
             self.reentrancy_guard.exit();
             self.env().revert(VaultError::InvalidRequest);
         }
         
-        if self.env().get_block_time() < request.unlock_time {
+        if self.env().get_block_time() < request_unlock_time {
             self.reentrancy_guard.exit();
-            self.env().revert(VaultError::TimelockActive);
+            self.env().revert(VaultError::Unauthorized);
         }
         
-        request.completed = true;
-        self.withdrawal_requests.set(&request_id, request);
+        self.withdrawal_request_completed.set(&request_id, true);
         
         // Withdraw from strategies if needed
         let instant_pool = self.instant_withdrawal_pool.get_or_default();
         
-        if request.assets_value > instant_pool {
-            let amount_from_strategies = request.assets_value.checked_sub(instant_pool).unwrap();
+        if request_assets > instant_pool {
+            let amount_from_strategies = request_assets.checked_sub(instant_pool).unwrap();
             
             
             
             self.instant_withdrawal_pool.set(U512::zero());
         } else {
-            let new_pool = instant_pool.checked_sub(request.assets_value).unwrap();
+            let new_pool = instant_pool.checked_sub(request_assets).unwrap();
             self.instant_withdrawal_pool.set(new_pool);
         }
         
-        let fee_amount = self.calculate_performance_fee(&caller, request.assets_value);
-        let assets_after_fee = request.assets_value.checked_sub(fee_amount).unwrap();
+        let fee_amount = self.calculate_performance_fee(&caller, request_assets);
+        let assets_after_fee = request_assets.checked_sub(fee_amount).unwrap();
         
         let total = self.total_shares.get_or_default();
-        self.total_shares.set(total.checked_sub(request.shares).unwrap());
+        self.total_shares.set(total.checked_sub(request_shares).unwrap());
         
         
         
@@ -493,7 +501,7 @@ impl VaultManager {
             user: caller,
             request_id: request_id,
             assets: assets_after_fee,
-            shares: request.shares,
+            shares: request_shares,
             cspr_amount: assets_after_fee,
             timestamp: self.env().get_block_time(),
         });
@@ -548,12 +556,10 @@ impl VaultManager {
         let new_user_shares = user_shares.checked_sub(shares).unwrap();
         if new_user_shares.is_zero() {
             self.user_shares.set(&caller, U512::zero());
-            self.user_deposits.set(&caller, UserDeposit {
-                cost_basis: U512::zero(),
-                total_deposited: U512::zero(),
-                total_shares: U512::zero(),
-                last_deposit_time: 0,
-            });
+            self.user_total_deposited.set(&caller, U512::zero());
+            self.user_total_shares.set(&caller, U512::zero());
+            self.user_cost_basis.set(&caller, U512::zero());
+            self.user_last_deposit_time.set(&caller, 0);
         } else {
             self.user_shares.set(&caller, new_user_shares);
         }
@@ -650,15 +656,15 @@ impl VaultManager {
 
     /// Maximum deposit allowed for a user (for rate limiting)
     pub fn max_deposit(&self, user: Address) -> U512 {
-        let deposit_data = self.user_deposits.get(&user);
+        let last_deposit_time = self.user_last_deposit_time.get(&user);
         
-        match deposit_data {
-            Some(data) => {
+        match last_deposit_time {
+            Some(time) => {
                 let current_time = self.env().get_block_time();
                 let time_window = 86400u64; // 24 hours
                 
                 // Reset if outside window
-                if current_time > data.last_deposit_time + time_window {
+                if current_time > time + time_window {
                     return self.max_deposit_per_day.get_or_default();
                 }
                 
@@ -683,18 +689,16 @@ impl VaultManager {
     /// Performance fee is charged on PROFITS only, not principal
     /// Tracks user's cost basis to determine profit
     fn calculate_performance_fee(&mut self, user: &Address, withdrawal_amount: U512) -> U512 {
-        let deposit_data = self.user_deposits.get(user);
+        let cost_basis = self.user_cost_basis.get(user);
         
-        match deposit_data {
-            Some(data) => {
-                let cost_basis = data.cost_basis;
-                
-                if withdrawal_amount <= cost_basis {
+        match cost_basis {
+            Some(basis) => {
+                if withdrawal_amount <= basis {
                     // No profit, no fee
                     return U512::zero();
                 }
                 
-                let profit = withdrawal_amount.checked_sub(cost_basis).unwrap();
+                let profit = withdrawal_amount.checked_sub(basis).unwrap();
                 
                 // Apply performance fee to profit only
                 let fee_bps = self.performance_fee_bps.get_or_default();
@@ -812,11 +816,11 @@ impl VaultManager {
         let current_time = self.env().get_block_time();
         let time_window = 86400u64; // 24 hours
         
-        let deposit_data = self.user_deposits.get(user);
+        let last_deposit_time = self.user_last_deposit_time.get(user);
         
-        match deposit_data {
-            Some(data) => {
-                if current_time > data.last_deposit_time + time_window {
+        match last_deposit_time {
+            Some(time) => {
+                if current_time > time + time_window {
                     // Reset daily limit
                     self.daily_deposits.set(user, (current_time, amount));
                     return true;
@@ -845,19 +849,18 @@ impl VaultManager {
     fn update_user_deposit_tracking(&mut self, user: &Address, amount: U512, shares: U512) {
         let current_time = self.env().get_block_time();
         
-        let mut deposit_data = self.user_deposits.get(user).unwrap_or(UserDeposit {
-            cost_basis: U512::zero(),
-            total_deposited: U512::zero(),
-            total_shares: U512::zero(),
-            last_deposit_time: 0,
-        });
+        let cost_basis = self.user_cost_basis.get(user).unwrap_or(U512::zero());
+        let total_deposited = self.user_total_deposited.get(user).unwrap_or(U512::zero());
+        let total_shares = self.user_total_shares.get(user).unwrap_or(U512::zero());
         
-        deposit_data.cost_basis = deposit_data.cost_basis.checked_add(amount).unwrap();
-        deposit_data.total_deposited = deposit_data.total_deposited.checked_add(amount).unwrap();
-        deposit_data.total_shares = deposit_data.total_shares.checked_add(shares).unwrap();
-        deposit_data.last_deposit_time = current_time;
+        let new_cost_basis = cost_basis.checked_add(amount).unwrap();
+        let new_total_deposited = total_deposited.checked_add(amount).unwrap();
+        let new_total_shares = total_shares.checked_add(shares).unwrap();
         
-        self.user_deposits.set(user, deposit_data);
+        self.user_cost_basis.set(user, new_cost_basis);
+        self.user_total_deposited.set(user, new_total_deposited);
+        self.user_total_shares.set(user, new_total_shares);
+        self.user_last_deposit_time.set(user, current_time);
     }
 
 
@@ -932,7 +935,24 @@ impl VaultManager {
     }
 
     pub fn get_withdrawal_request(&self, request_id: U256) -> Option<WithdrawalRequest> {
-        self.withdrawal_requests.get(&request_id)
+        if let Some(user) = self.withdrawal_request_users.get(&request_id) {
+            let shares = self.withdrawal_request_shares.get(&request_id).unwrap_or(U512::zero());
+            let assets_value = self.withdrawal_request_assets.get(&request_id).unwrap_or(U512::zero());
+            let request_time = self.withdrawal_request_times.get(&request_id).unwrap_or(0);
+            let unlock_time = self.withdrawal_request_unlock_times.get(&request_id).unwrap_or(0);
+            let completed = self.withdrawal_request_completed.get(&request_id).unwrap_or(false);
+            
+            Some(WithdrawalRequest {
+                user,
+                shares,
+                assets_value,
+                request_time,
+                unlock_time,
+                completed,
+            })
+        } else {
+            None
+        }
     }
 
     pub fn get_instant_pool_balance(&self) -> U512 {

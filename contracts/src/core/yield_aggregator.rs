@@ -11,7 +11,7 @@ use crate::utils::{AccessControl, ReentrancyGuard, Pausable};
 use crate::core::{LiquidStaking, StrategyRouter, VaultManager};
 
 /// Yield report from all sources
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, odra::OdraType)]
 pub struct YieldReport {
     pub total_yield: U512,
     pub staking_yield: U512,
@@ -23,7 +23,7 @@ pub struct YieldReport {
 }
 
 /// APY data point for historical tracking
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, odra::OdraType)]
 pub struct ApyDataPoint {
     pub apy: U256,
     pub timestamp: u64,
@@ -74,8 +74,14 @@ pub struct YieldAggregator {
     /// Fee recipient address
     fee_recipient: Var<Address>,
     
-    /// Historical yield reports
-    yield_history: Mapping<u64, YieldReport>,
+    /// Historical yield reports - flattened
+    yield_report_total: Mapping<u64, U512>,
+    yield_report_staking: Mapping<u64, U512>,
+    yield_report_dex: Mapping<u64, U512>,
+    yield_report_lending: Mapping<u64, U512>,
+    yield_report_crosschain: Mapping<u64, U512>,
+    yield_report_timestamp: Mapping<u64, u64>,
+    yield_report_apy: Mapping<u64, U256>,
     
     /// Yield report counter
     report_count: Var<u64>,
@@ -95,9 +101,10 @@ impl YieldAggregator {
     /// Initialize the yield aggregator
     pub fn init(
         &mut self,
+        admin: Address,
         fee_recipient: Address,
     ) {
-        self.access_control.init();
+        self.access_control.init(admin);
         
         self.min_compound_interval.set(3600); // 1 hour
         self.min_yield_threshold.set(U512::from(100_000_000_000u64)); // 100 CSPR (9 decimals)
@@ -141,19 +148,15 @@ impl YieldAggregator {
         // Get current blended APY
         let apy_snapshot = self.calculate_current_apy();
         
-        // Create yield report
-        let report = YieldReport {
-            total_yield,
-            staking_yield,
-            dex_yield,
-            lending_yield,
-            crosschain_yield,
-            timestamp,
-            apy_snapshot,
-        };
-        
+        // Store yield report using individual fields
         let count = self.report_count.get_or_default();
-        self.yield_history.set(&count, report.clone());
+        self.yield_report_total.set(&count, total_yield);
+        self.yield_report_staking.set(&count, staking_yield);
+        self.yield_report_dex.set(&count, dex_yield);
+        self.yield_report_lending.set(&count, lending_yield);
+        self.yield_report_crosschain.set(&count, crosschain_yield);
+        self.yield_report_timestamp.set(&count, timestamp);
+        self.yield_report_apy.set(&count, apy_snapshot);
         self.report_count.set(count + 1);
         
         let total = self.total_yields_harvested.get_or_default();
@@ -166,7 +169,16 @@ impl YieldAggregator {
             timestamp,
         });
         
-        report
+        // Construct and return the report
+        YieldReport {
+            total_yield,
+            staking_yield,
+            dex_yield,
+            lending_yield,
+            crosschain_yield,
+            timestamp,
+            apy_snapshot,
+        }
     }
     
     /// Compound yields back into the vault
@@ -252,8 +264,9 @@ impl YieldAggregator {
     fn update_share_price(&mut self) {
         let timestamp = self.env().get_block_time();
         let share_price = self.vault_manager.get_share_price();
+        let share_price_u256 = U256::from(share_price.as_u128());
         
-        self.share_price_history.set(&timestamp, share_price);
+        self.share_price_history.set(&timestamp, share_price_u256);
         
         let total_assets = self.vault_manager.total_assets();
         let apy = self.calculate_current_apy();
@@ -269,7 +282,7 @@ impl YieldAggregator {
         self.apy_count.set(count + 1);
         
         self.env().emit_event(SharePriceUpdated {
-            share_price,
+            share_price: share_price_u256,
             total_assets,
             timestamp,
         });
@@ -277,14 +290,14 @@ impl YieldAggregator {
     
     /// Calculate current APY from all sources
     fn calculate_current_apy(&self) -> U256 {
-        // Get staking APY
-        let staking_apy = self.liquid_staking.get_staking_apy();
+        // Get staking APY (for MVP, use a fixed 8% APY for liquid staking)
+        let staking_apy = U256::from(800u64); // 8.00% in basis points
         
         // Get blended strategy APY
         let strategy_apy = self.strategy_router.calculate_blended_apy();
         
         // Combine APYs (simplified: average for MVP)
-        (U256::from(staking_apy) + strategy_apy) / U256::from(2u64)
+        (staking_apy + strategy_apy) / U256::from(2u64)
     }
     
     /// Get historical APY over a period
@@ -354,7 +367,7 @@ impl YieldAggregator {
             self.env().revert(VaultError::NoFeesToDistribute);
         }
         
-        let recipient = self.fee_recipient.get_or_default();
+        let recipient = self.fee_recipient.get().unwrap_or_else(|| self.env().caller());
         
         // For MVP, just reset accumulated fees
         self.accumulated_fees.set(U512::zero());
@@ -377,12 +390,33 @@ impl YieldAggregator {
         if count == 0 {
             return None;
         }
-        self.yield_history.get(&(count - 1))
+        let idx = count - 1;
+        Some(YieldReport {
+            total_yield: self.yield_report_total.get(&idx).unwrap_or(U512::zero()),
+            staking_yield: self.yield_report_staking.get(&idx).unwrap_or(U512::zero()),
+            dex_yield: self.yield_report_dex.get(&idx).unwrap_or(U512::zero()),
+            lending_yield: self.yield_report_lending.get(&idx).unwrap_or(U512::zero()),
+            crosschain_yield: self.yield_report_crosschain.get(&idx).unwrap_or(U512::zero()),
+            timestamp: self.yield_report_timestamp.get(&idx).unwrap_or(0),
+            apy_snapshot: self.yield_report_apy.get(&idx).unwrap_or(U256::zero()),
+        })
     }
     
     /// Get yield report by index
     pub fn get_yield_report(&self, index: u64) -> Option<YieldReport> {
-        self.yield_history.get(&index)
+        if self.yield_report_total.get(&index).is_some() {
+            Some(YieldReport {
+                total_yield: self.yield_report_total.get(&index).unwrap_or(U512::zero()),
+                staking_yield: self.yield_report_staking.get(&index).unwrap_or(U512::zero()),
+                dex_yield: self.yield_report_dex.get(&index).unwrap_or(U512::zero()),
+                lending_yield: self.yield_report_lending.get(&index).unwrap_or(U512::zero()),
+                crosschain_yield: self.yield_report_crosschain.get(&index).unwrap_or(U512::zero()),
+                timestamp: self.yield_report_timestamp.get(&index).unwrap_or(0),
+                apy_snapshot: self.yield_report_apy.get(&index).unwrap_or(U256::zero()),
+            })
+        } else {
+            None
+        }
     }
     
     /// Get total number of yield reports

@@ -5,7 +5,7 @@ use odra::casper_types::{U256, U512};
 use crate::types::*;
 
 /// Validator performance metrics
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, odra::OdraType)]
 pub struct ValidatorMetrics {
     pub validator: Address,
     pub uptime_percentage: u8,
@@ -21,7 +21,7 @@ pub struct ValidatorMetrics {
 }
 
 /// Validator selection result
-#[derive(Debug, Clone)]
+#[derive(Debug, odra::OdraType)]
 pub struct ValidatorAllocation {
     pub validator: Address,
     pub amount: U512,
@@ -36,8 +36,17 @@ pub struct ValidatorAllocation {
 /// - Risk scoring and health checks
 #[odra::module]
 pub struct ValidatorRegistry {
-    /// Validator metrics storage
-    validators: Mapping<Address, ValidatorMetrics>,
+    /// Validator metrics storage - flattened
+    validator_uptime: Mapping<Address, u8>,
+    validator_commission: Mapping<Address, u8>,
+    validator_stake: Mapping<Address, U512>,
+    validator_max_stake: Mapping<Address, U512>,
+    validator_verified: Mapping<Address, bool>,
+    validator_risk_score: Mapping<Address, u8>,
+    validator_delegators: Mapping<Address, u32>,
+    validator_last_check: Mapping<Address, u64>,
+    validator_good_epochs: Mapping<Address, u32>,
+    validator_rewards: Mapping<Address, U512>,
     
     /// Active validators list
     active_validators: Var<Vec<Address>>,
@@ -83,42 +92,38 @@ impl ValidatorRegistry {
         commission_rate: u8,
         max_stake_cap: U512,
         is_verified: bool,
-    ) -> Result<(), StakingError> {
-        if self.validators.get(&validator).is_some() {
-            return Err(StakingError::ValidatorNotEligible);
+    ) -> () {
+        if self.validator_uptime.get(&validator).is_some() {
+            self.env().revert(StakingError::ValidatorNotEligible);
         }
         
         // Validate minimum requirements
         if uptime_percentage < self.min_uptime.get_or_default() {
-            return Err(StakingError::ValidatorNotEligible);
+            self.env().revert(StakingError::ValidatorNotEligible);
         }
         
         if commission_rate > self.max_commission.get_or_default() {
-            return Err(StakingError::ValidatorNotEligible);
+            self.env().revert(StakingError::ValidatorNotEligible);
         }
         
         if self.blacklisted.get(&validator).unwrap_or(false) {
-            return Err(StakingError::ValidatorNotEligible);
+            self.env().revert(StakingError::ValidatorNotEligible);
         }
         
         let risk_score = self.calculate_risk_score(uptime_percentage, commission_rate, 0);
+        let current_time = self.env().get_block_time();
         
-        // Create validator metrics
-        let metrics = ValidatorMetrics {
-            validator,
-            uptime_percentage,
-            commission_rate,
-            current_stake: U512::zero(),
-            max_stake_cap,
-            is_verified,
-            risk_score,
-            total_delegators: 0,
-            last_performance_check: self.env().get_block_time(),
-            consecutive_good_epochs: 0,
-            total_rewards_earned: U512::zero(),
-        };
-        
-        self.validators.set(&validator, metrics);
+        // Create validator metrics using individual fields
+        self.validator_uptime.set(&validator, uptime_percentage);
+        self.validator_commission.set(&validator, commission_rate);
+        self.validator_stake.set(&validator, U512::zero());
+        self.validator_max_stake.set(&validator, max_stake_cap);
+        self.validator_verified.set(&validator, is_verified);
+        self.validator_risk_score.set(&validator, risk_score);
+        self.validator_delegators.set(&validator, 0);
+        self.validator_last_check.set(&validator, current_time);
+        self.validator_good_epochs.set(&validator, 0);
+        self.validator_rewards.set(&validator, U512::zero());
         
         // Add to active list
         let mut active = self.active_validators.get_or_default();
@@ -128,8 +133,6 @@ impl ValidatorRegistry {
         self.env().emit_event(ValidatorAdded {
             validator,
         });
-        
-        Ok(())
     }
 
     /// Deregister a validator
@@ -141,10 +144,11 @@ impl ValidatorRegistry {
         active.retain(|v| v != &validator);
         self.active_validators.set(active);
         
-        if let Some(metrics) = self.validators.get(&validator) {
+        let current_stake = self.validator_stake.get(&validator).unwrap_or(U512::zero());
+        if !current_stake.is_zero() {
             let total = self.total_stake.get_or_default();
-            if total >= metrics.current_stake {
-                self.total_stake.set(total - metrics.current_stake);
+            if total >= current_stake {
+                self.total_stake.set(total - current_stake);
             }
         }
         
@@ -161,37 +165,39 @@ impl ValidatorRegistry {
         validator: Address,
         uptime_percentage: u8,
         commission_rate: u8,
-    ) -> Result<(), StakingError> {
-        let mut metrics = self.validators.get(&validator)
-            .ok_or(StakingError::ValidatorNotFound)?;
-        
-        metrics.uptime_percentage = uptime_percentage;
-        metrics.commission_rate = commission_rate;
-        metrics.last_performance_check = self.env().get_block_time();
-        
-        if uptime_percentage >= self.min_uptime.get_or_default()
-            && commission_rate <= self.max_commission.get_or_default()
-        {
-            metrics.consecutive_good_epochs += 1;
-        } else {
-            metrics.consecutive_good_epochs = 0;
+    ) {
+        if self.validator_uptime.get(&validator).is_none() {
+            self.env().revert(StakingError::ValidatorNotFound);
         }
         
+        let current_time = self.env().get_block_time();
+        let consecutive_good_epochs = self.validator_good_epochs.get(&validator).unwrap_or(0);
+        
+        self.validator_uptime.set(&validator, uptime_percentage);
+        self.validator_commission.set(&validator, commission_rate);
+        self.validator_last_check.set(&validator, current_time);
+        
+        let new_consecutive_epochs = if uptime_percentage >= self.min_uptime.get_or_default()
+            && commission_rate <= self.max_commission.get_or_default()
+        {
+            consecutive_good_epochs + 1
+        } else {
+            0
+        };
+        self.validator_good_epochs.set(&validator, new_consecutive_epochs);
+        
         // Recalculate risk score
-        metrics.risk_score = self.calculate_risk_score(
+        let risk_score = self.calculate_risk_score(
             uptime_percentage,
             commission_rate,
-            metrics.consecutive_good_epochs,
+            new_consecutive_epochs,
         );
-        
-        self.validators.set(&validator, metrics);
+        self.validator_risk_score.set(&validator, risk_score);
         
         // Auto-remove if performance drops
         if uptime_percentage < self.min_uptime.get_or_default() {
             self.deregister_validator(validator, "Low uptime".to_string());
         }
-        
-        Ok(())
     }
 
     /// Select validators for stake delegation
@@ -214,36 +220,50 @@ impl ValidatorRegistry {
         let max_per_validator_pct = self.max_per_validator_pct.get_or_default();
         
         // Step 1: Filter eligible validators
-        let mut eligible: Vec<(Address, ValidatorMetrics, u64)> = Vec::new();
+        let mut eligible: Vec<(Address, u64)> = Vec::new();
         
         for validator_addr in active_validators.iter() {
-            if let Some(metrics) = self.validators.get(validator_addr) {
-                if metrics.uptime_percentage >= min_uptime
-                    && metrics.commission_rate <= max_commission
-                    && metrics.is_verified
-                    && !self.blacklisted.get(validator_addr).unwrap_or(false)
-                {
-                    let remaining_capacity = if metrics.current_stake < metrics.max_stake_cap {
-                        metrics.max_stake_cap - metrics.current_stake
-                    } else {
-                        U512::zero()
-                    };
+            let uptime = self.validator_uptime.get(validator_addr);
+            if uptime.is_none() {
+                continue;
+            }
+            
+            let uptime_val = uptime.unwrap();
+            let commission = self.validator_commission.get(validator_addr).unwrap_or(100);
+            let verified = self.validator_verified.get(validator_addr).unwrap_or(false);
+            let current_stake = self.validator_stake.get(validator_addr).unwrap_or(U512::zero());
+            let max_stake_cap = self.validator_max_stake.get(validator_addr).unwrap_or(U512::zero());
+            
+            if uptime_val >= min_uptime
+                && commission <= max_commission
+                && verified
+                && !self.blacklisted.get(validator_addr).unwrap_or(false)
+            {
+                let remaining_capacity = if current_stake < max_stake_cap {
+                    max_stake_cap - current_stake
+                } else {
+                    U512::zero()
+                };
                     
                     // Only include if has capacity
                     if remaining_capacity > U512::zero() {
-                        let score = self.calculate_decentralization_score(&metrics, total_stake);
-                        eligible.push((*validator_addr, metrics, score));
+                        let score = self.calculate_decentralization_score(
+                            current_stake,
+                            uptime_val,
+                            commission,
+                            total_stake
+                        );
+                        eligible.push((*validator_addr, score));
                     }
                 }
             }
-        }
         
         if eligible.is_empty() {
             return Vec::new();
         }
         
         // Step 2: Sort by score (highest first)
-        eligible.sort_by(|a, b| b.2.cmp(&a.2));
+        eligible.sort_by(|a, b| b.1.cmp(&a.1));
         
         // Step 3: Distribute stake
         let mut allocations: Vec<ValidatorAllocation> = Vec::new();
@@ -257,19 +277,22 @@ impl ValidatorRegistry {
         let num_validators = eligible.len();
         let base_allocation = amount_to_stake / U512::from(num_validators);
         
-        for (validator, metrics, _score) in eligible.iter() {
+        for (validator, _score) in eligible.iter() {
             if remaining.is_zero() {
                 break;
             }
             
-            let capacity_limit = if metrics.current_stake < metrics.max_stake_cap {
-                metrics.max_stake_cap - metrics.current_stake
+            let current_stake = self.validator_stake.get(validator).unwrap_or(U512::zero());
+            let max_stake_cap = self.validator_max_stake.get(validator).unwrap_or(U512::zero());
+            
+            let capacity_limit = if current_stake < max_stake_cap {
+                max_stake_cap - current_stake
             } else {
                 U512::zero()
             };
             
-            let percentage_limit = if metrics.current_stake < max_per_validator {
-                max_per_validator - metrics.current_stake
+            let percentage_limit = if current_stake < max_per_validator {
+                max_per_validator - current_stake
             } else {
                 U512::zero()
             };
@@ -308,16 +331,16 @@ impl ValidatorRegistry {
                         break;
                     }
                     
-                    if let Some(metrics) = self.validators.get(&alloc.validator) {
-                        let new_stake = metrics.current_stake + alloc.amount;
-                        
-                        if new_stake < metrics.max_stake_cap && new_stake < max_per_validator {
-                            let additional = U512::from(1_000_000_000u64); // 1 CSPR
-                            if additional <= remaining {
-                                alloc.amount += additional;
-                                remaining -= additional;
-                                distributed_this_round = true;
-                            }
+                    let current_stake = self.validator_stake.get(&alloc.validator).unwrap_or(U512::zero());
+                    let max_stake_cap = self.validator_max_stake.get(&alloc.validator).unwrap_or(U512::zero());
+                    let new_stake = current_stake + alloc.amount;
+                    
+                    if new_stake < max_stake_cap && new_stake < max_per_validator {
+                        let additional = U512::from(1_000_000_000u64); // 1 CSPR
+                        if additional <= remaining {
+                            alloc.amount += additional;
+                            remaining -= additional;
+                            distributed_this_round = true;
                         }
                     }
                 }
@@ -405,14 +428,16 @@ impl ValidatorRegistry {
     /// Validators with lower stake get higher scores
     fn calculate_decentralization_score(
         &self,
-        metrics: &ValidatorMetrics,
+        current_stake: U512,
+        uptime: u8,
+        commission: u8,
         total_stake: U512,
     ) -> u64 {
         if total_stake.is_zero() {
             return 100_000_000; // High score if no stake yet
         }
         
-        let validator_pct = (metrics.current_stake * U512::from(1_000_000u64) / total_stake)
+        let validator_pct = (current_stake * U512::from(1_000_000u64) / total_stake)
             .as_u64();
         
         // Lower percentage = higher score
@@ -420,15 +445,12 @@ impl ValidatorRegistry {
         let base_score = 1_000_000u64.saturating_sub(validator_pct * 100);
         
         // Boost score for high uptime
-        let uptime_boost = (metrics.uptime_percentage as u64) * 1_000;
+        let uptime_boost = (uptime as u64) * 1_000;
         
         // Penalty for high commission
-        let commission_penalty = (metrics.commission_rate as u64) * 10_000;
+        let commission_penalty = (commission as u64) * 10_000;
         
-        // Boost for low risk score
-        let risk_boost = (100 - metrics.risk_score as u64) * 1_000;
-        
-        base_score + uptime_boost + risk_boost - commission_penalty
+        base_score + uptime_boost - commission_penalty
     }
 
     /// Update validator stake amount
@@ -436,32 +458,33 @@ impl ValidatorRegistry {
         &mut self,
         validator: Address,
         new_stake: U512,
-    ) -> Result<(), StakingError> {
-        let mut metrics = self.validators.get(&validator)
-            .ok_or(StakingError::ValidatorNotFound)?;
+    ) {
+        if self.validator_uptime.get(&validator).is_none() {
+            self.env().revert(StakingError::ValidatorNotFound);
+        }
         
-        let old_stake = metrics.current_stake;
-        metrics.current_stake = new_stake;
-        
-        self.validators.set(&validator, metrics);
+        let old_stake = self.validator_stake.get(&validator).unwrap_or(U512::zero());
+        self.validator_stake.set(&validator, new_stake);
         
         let total = self.total_stake.get_or_default();
         let new_total = total + new_stake - old_stake;
         self.total_stake.set(new_total);
-        
-        Ok(())
     }
 
     /// Check if validator is eligible for delegation
     pub fn is_eligible(&self, validator: Address) -> bool {
-        if let Some(metrics) = self.validators.get(&validator) {
-            metrics.uptime_percentage >= self.min_uptime.get_or_default()
-                && metrics.commission_rate <= self.max_commission.get_or_default()
-                && metrics.is_verified
-                && !self.blacklisted.get(&validator).unwrap_or(false)
-        } else {
-            false
+        let uptime = self.validator_uptime.get(&validator);
+        if uptime.is_none() {
+            return false;
         }
+        
+        let commission = self.validator_commission.get(&validator).unwrap_or(100);
+        let verified = self.validator_verified.get(&validator).unwrap_or(false);
+        
+        uptime.unwrap() >= self.min_uptime.get_or_default()
+            && commission <= self.max_commission.get_or_default()
+            && verified
+            && !self.blacklisted.get(&validator).unwrap_or(false)
     }
 
     /// Blacklist a validator
@@ -472,7 +495,23 @@ impl ValidatorRegistry {
 
     /// Get validator metrics
     pub fn get_validator_metrics(&self, validator: Address) -> Option<ValidatorMetrics> {
-        self.validators.get(&validator)
+        if let Some(uptime) = self.validator_uptime.get(&validator) {
+            Some(ValidatorMetrics {
+                validator,
+                uptime_percentage: uptime,
+                commission_rate: self.validator_commission.get(&validator).unwrap_or(0),
+                current_stake: self.validator_stake.get(&validator).unwrap_or(U512::zero()),
+                max_stake_cap: self.validator_max_stake.get(&validator).unwrap_or(U512::zero()),
+                is_verified: self.validator_verified.get(&validator).unwrap_or(false),
+                risk_score: self.validator_risk_score.get(&validator).unwrap_or(0),
+                total_delegators: self.validator_delegators.get(&validator).unwrap_or(0),
+                last_performance_check: self.validator_last_check.get(&validator).unwrap_or(0),
+                consecutive_good_epochs: self.validator_good_epochs.get(&validator).unwrap_or(0),
+                total_rewards_earned: self.validator_rewards.get(&validator).unwrap_or(U512::zero()),
+            })
+        } else {
+            None
+        }
     }
 
     /// Get all active validators

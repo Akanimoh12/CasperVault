@@ -14,9 +14,9 @@ impl SlippageProtection {
         self.max_slippage_bps.set(100);
     }
     
-    pub fn check_slippage(&self, expected: U512, actual: U512) -> Result<(), VaultError> {
+    pub fn check_slippage(&self, expected: U512, actual: U512) {
         if expected == U512::zero() {
-            return Ok(());
+            return;
         }
         
         let max_slippage = self.max_slippage_bps.get_or_default();
@@ -35,10 +35,8 @@ impl SlippageProtection {
                 max_slippage_bps: max_slippage,
                 timestamp: self.env().get_block_time(),
             });
-            return Err(VaultError::SlippageExceeded);
+            self.env().revert(VaultError::SlippageExceeded);
         }
-        
-        Ok(())
     }
     
     pub fn set_max_slippage(&mut self, slippage_bps: u32) {
@@ -48,7 +46,7 @@ impl SlippageProtection {
         self.max_slippage_bps.set(slippage_bps);
     }
     
-    pub fn get_max_slippage(&self) -> u16 {
+    pub fn get_max_slippage(&self) -> u32 {
         self.max_slippage_bps.get_or_default()
     }
     

@@ -2,7 +2,7 @@ use odra::prelude::*;
 use odra::{Address, Event, Mapping, Var};
 use odra::casper_types::U512;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, odra::OdraType)]
 pub struct Proposal {
     pub proposer: Address,
     pub target_contract: Address,

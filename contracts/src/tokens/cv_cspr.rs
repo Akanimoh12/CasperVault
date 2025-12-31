@@ -121,7 +121,7 @@ impl CvCspr {
     pub fn mint(&mut self, to: Address, amount: U512) {
         // Only vault manager can mint
         let caller = self.env().caller();
-        let vault_manager = self.vault_manager.get_or_revert(&self.env());
+        let vault_manager = self.vault_manager.get().unwrap_or_else(|| self.env().revert(TokenError::InsufficientTokenBalance));
         if caller != vault_manager {
             self.env().revert(TokenError::InsufficientTokenBalance); // Use generic error
         }
@@ -147,7 +147,7 @@ impl CvCspr {
     pub fn burn(&mut self, from: Address, amount: U512) {
         // Only vault manager can burn
         let caller = self.env().caller();
-        let vault_manager = self.vault_manager.get_or_revert(&self.env());
+        let vault_manager = self.vault_manager.get().unwrap_or_else(|| self.env().revert(TokenError::InsufficientTokenBalance));
         if caller != vault_manager {
             self.env().revert(TokenError::InsufficientTokenBalance); // Use generic error
         }

@@ -3,7 +3,7 @@ use odra::{Address, Event, Mapping, Var};
 use odra::casper_types::U512;
 use crate::types::VaultError;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, odra::OdraType)]
 pub struct RateLimit {
     pub max_per_tx: U512,
     pub max_per_day: U512,
@@ -35,17 +35,17 @@ impl RateLimiter {
         self.last_hourly_reset.set(self.env().get_block_time());
     }
     
-    pub fn check_deposit_limit(&mut self, user: Address, amount: U512) -> Result<(), VaultError> {
+    pub fn check_deposit_limit(&mut self, user: Address, amount: U512) {
         let max_tx = self.max_per_tx.get_or_default();
         if amount > max_tx {
-            return Err(VaultError::RateLimitExceeded);
+            self.env().revert(VaultError::RateLimitExceeded);
         }
         
         self.reset_if_needed();
         
         let current_time = self.env().get_block_time();
         let mut user_limit = self.per_user_limits.get(&user).unwrap_or(RateLimit {
-            max_per_tx,
+            max_per_tx: self.max_per_tx.get_or_default(),
             max_per_day: self.max_per_day_per_user.get_or_default(),
             current_day_total: U512::zero(),
             last_reset: current_time,
@@ -58,34 +58,31 @@ impl RateLimiter {
         
         let new_total = user_limit.current_day_total + amount;
         if new_total > user_limit.max_per_day {
-            return Err(VaultError::RateLimitExceeded);
+            self.env().revert(VaultError::RateLimitExceeded);
         }
         
         let global_deposits = self.global_hourly_deposits.get_or_default();
         let max_global = self.max_global_deposits_per_hour.get_or_default();
         if global_deposits + amount > max_global {
-            return Err(VaultError::RateLimitExceeded);
+            self.env().revert(VaultError::RateLimitExceeded);
         }
         
         user_limit.current_day_total = new_total;
         self.per_user_limits.set(&user, user_limit);
         self.global_hourly_deposits.set(global_deposits + amount);
-        
-        Ok(())
     }
     
-    pub fn check_withdrawal_limit(&mut self, amount: U512) -> Result<(), VaultError> {
+    pub fn check_withdrawal_limit(&mut self, amount: U512) {
         self.reset_if_needed();
         
         let global_withdrawals = self.global_hourly_withdrawals.get_or_default();
         let max_global = self.max_global_withdrawals_per_hour.get_or_default();
         
         if global_withdrawals + amount > max_global {
-            return Err(VaultError::RateLimitExceeded);
+            self.env().revert(VaultError::RateLimitExceeded);
         }
         
         self.global_hourly_withdrawals.set(global_withdrawals + amount);
-        Ok(())
     }
     
     fn reset_if_needed(&mut self) {

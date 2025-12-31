@@ -5,15 +5,16 @@
 
 use odra::prelude::*;
 use odra::Event;
-use odra::{Address, Mapping, SubModule, Var};
+use odra::{Address, SubModule, Var};
 use odra::casper_types::{U256, U512};
-use crate::strategies::strategy_interface::{IStrategy, RiskLevel, StrategyError};
+use crate::types::VaultError;
+use crate::strategies::strategy_interface::{RiskLevel, StrategyError};
 use crate::utils::access_control::AccessControl;
 use crate::utils::pausable::Pausable;
 use crate::utils::reentrancy_guard::ReentrancyGuard;
 
 /// Lending position tracking
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct LendingPosition {
     /// Principal supplied
     principal: U512,
@@ -45,8 +46,11 @@ pub struct LendingStrategy {
     
     /// CORE STATE
     
-    /// Current lending position
-    position: Var<LendingPosition>,
+    /// Lending position fields (flattened for Casper serialization)
+    principal: Var<U512>,
+    interest_accrued: Var<U512>,
+    supply_time: Var<u64>,
+    c_tokens: Var<U512>,
     
     /// Total supplied (lifetime)
     total_supplied: Var<U512>,
@@ -111,12 +115,10 @@ impl LendingStrategy {
         self.min_harvest_interval.set(43200); // 12 hours
         self.cached_apy.set(U256::from(800u64)); // 8% initial estimate
         
-        self.position.set(LendingPosition {
-            principal: U512::zero(),
-            interest_accrued: U512::zero(),
-            supply_time: 0,
-            c_tokens: U512::zero(),
-        });
+        self.principal.set(U512::zero());
+        self.interest_accrued.set(U512::zero());
+        self.supply_time.set(0);
+        self.c_tokens.set(U512::zero());
         
         self.total_supplied.set(U512::zero());
         self.total_withdrawn.set(U512::zero());
@@ -131,38 +133,41 @@ impl LendingStrategy {
     /// 2. Supply to lending protocol
     /// 3. Receive cTokens
     /// 4. Track position
-    pub fn deploy(&mut self, amount: U512) -> Result<U512, StrategyError> {
+    pub fn deploy(&mut self, amount: U512) -> U512 {
         self.pausable.when_not_paused();
         self.reentrancy_guard.enter();
         
         let min = self.min_supply.get_or_default();
         if amount < min {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::AmountTooLow);
+            return U512::zero(); // Error: AmountTooLow
         }
         
-        let current_position = self.position.get_or_default();
+        let current_principal = self.principal.get_or_default();
         let max_cap = self.max_capacity.get_or_default();
-        if current_position.principal.checked_add(amount).unwrap() > max_cap {
+        if current_principal.checked_add(amount).unwrap() > max_cap {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::MaxCapacityReached);
+            return U512::zero(); // Error: MaxCapacityReached
         }
         
         let utilization = self.get_pool_utilization();
         let max_util = self.max_utilization_bps.get_or_default();
         if utilization > max_util {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::UnhealthyStrategy);
+            return U512::zero(); // Error: UnhealthyStrategy
         }
         
         
         let c_tokens_minted = amount;
         
-        let mut new_position = current_position;
-        new_position.principal = new_position.principal.checked_add(amount).unwrap();
-        new_position.c_tokens = new_position.c_tokens.checked_add(c_tokens_minted).unwrap();
-        new_position.supply_time = self.env().get_block_time();
-        self.position.set(new_position);
+        let new_principal = current_principal.checked_add(amount).unwrap();
+        let current_c_tokens = self.c_tokens.get_or_default();
+        let new_c_tokens = current_c_tokens.checked_add(c_tokens_minted).unwrap();
+        let new_supply_time = self.env().get_block_time();
+        
+        self.principal.set(new_principal);
+        self.c_tokens.set(new_c_tokens);
+        self.supply_time.set(new_supply_time);
         
         let total = self.total_supplied.get_or_default();
         self.total_supplied.set(total.checked_add(amount).unwrap());
@@ -174,7 +179,7 @@ impl LendingStrategy {
         });
         
         self.reentrancy_guard.exit();
-        Ok(amount)
+        amount
     }
     
     /// Withdraw funds from lending pool
@@ -184,51 +189,54 @@ impl LendingStrategy {
     /// 2. Redeem from lending protocol
     /// 3. Receive lstCSPR
     /// 4. Update position
-    pub fn withdraw(&mut self, amount: U512) -> Result<U512, StrategyError> {
+    pub fn withdraw(&mut self, amount: U512) -> U512 {
         self.pausable.when_not_paused();
         self.reentrancy_guard.enter();
         
-        let position = self.position.get_or_default();
+        let principal = self.principal.get_or_default();
+        let interest = self.interest_accrued.get_or_default();
+        let c_tokens = self.c_tokens.get_or_default();
         
-        let total_balance = position.principal.checked_add(position.interest_accrued).unwrap();
+        let total_balance = principal.checked_add(interest).unwrap();
         if amount > total_balance {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::WithdrawalTooLarge);
+            return U512::zero(); // Error: WithdrawalTooLarge
         }
         
         // In real protocol: c_tokens = amount / exchange_rate
         let c_tokens_to_redeem = if total_balance.is_zero() {
             U512::zero()
         } else {
-            amount.checked_mul(position.c_tokens).unwrap()
+            amount.checked_mul(c_tokens).unwrap()
                 .checked_div(total_balance).unwrap()
         };
         
         
         let lst_received = amount;
         
-        let mut new_position = position;
-        new_position.c_tokens = new_position.c_tokens.checked_sub(c_tokens_to_redeem).unwrap();
+        let new_c_tokens = c_tokens.checked_sub(c_tokens_to_redeem).unwrap();
         
         // Reduce principal proportionally
         let principal_reduction = if total_balance.is_zero() {
             U512::zero()
         } else {
-            amount.checked_mul(position.principal).unwrap()
+            amount.checked_mul(principal).unwrap()
                 .checked_div(total_balance).unwrap()
         };
         
-        new_position.principal = new_position.principal.checked_sub(principal_reduction).unwrap();
+        let new_principal = principal.checked_sub(principal_reduction).unwrap();
         
         // Reduce interest if withdrawn
-        if amount > principal_reduction {
+        let new_interest = if amount > principal_reduction {
             let interest_reduction = amount.checked_sub(principal_reduction).unwrap();
-            new_position.interest_accrued = new_position.interest_accrued
-                .checked_sub(interest_reduction)
-                .unwrap_or(U512::zero());
-        }
+            interest.checked_sub(interest_reduction).unwrap_or(U512::zero())
+        } else {
+            interest
+        };
         
-        self.position.set(new_position);
+        self.principal.set(new_principal);
+        self.c_tokens.set(new_c_tokens);
+        self.interest_accrued.set(new_interest);
         
         let total = self.total_withdrawn.get_or_default();
         self.total_withdrawn.set(total.checked_add(lst_received).unwrap());
@@ -240,7 +248,7 @@ impl LendingStrategy {
         });
         
         self.reentrancy_guard.exit();
-        Ok(lst_received)
+        lst_received
     }
     
     /// Harvest accrued interest
@@ -250,7 +258,7 @@ impl LendingStrategy {
     /// 2. Calculate interest earned since last harvest
     /// 3. Update interest tracking
     /// 4. Return harvested amount
-    pub fn harvest(&mut self) -> Result<U512, StrategyError> {
+    pub fn harvest(&mut self) -> U512 {
         self.pausable.when_not_paused();
         self.reentrancy_guard.enter();
         
@@ -260,22 +268,24 @@ impl LendingStrategy {
         
         if current_time < last_harvest + min_interval {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::Unauthorized);
+            return U512::zero(); // Error: Unauthorized
         }
         
-        let position = self.position.get_or_default();
+        let principal = self.principal.get_or_default();
+        let interest = self.interest_accrued.get_or_default();
+        let supply_time = self.supply_time.get_or_default();
         
-        if position.principal.is_zero() {
+        if principal.is_zero() {
             self.reentrancy_guard.exit();
-            return Ok(U512::zero());
+            return U512::zero();
         }
         
         
-        let time_elapsed = current_time - position.supply_time;
+        let time_elapsed = current_time - supply_time;
         let annual_apy_bps = 800u64; // 8%
         let seconds_per_year = 31536000u64;
         
-        let simulated_interest = position.principal
+        let simulated_interest = principal
             .checked_mul(U512::from(annual_apy_bps))
             .unwrap()
             .checked_mul(U512::from(time_elapsed))
@@ -285,36 +295,35 @@ impl LendingStrategy {
             .checked_div(U512::from(10000u64))
             .unwrap();
         
-        let new_interest = if simulated_interest > position.interest_accrued {
-            simulated_interest.checked_sub(position.interest_accrued).unwrap()
+        let new_interest_earned = if simulated_interest > interest {
+            simulated_interest.checked_sub(interest).unwrap()
         } else {
             U512::zero()
         };
         
-        let mut new_position = position;
-        new_position.interest_accrued = simulated_interest;
-        self.position.set(new_position);
+        self.interest_accrued.set(simulated_interest);
         
         let total = self.total_interest_earned.get_or_default();
-        self.total_interest_earned.set(total.checked_add(new_interest).unwrap());
+        self.total_interest_earned.set(total.checked_add(new_interest_earned).unwrap());
         self.last_harvest.set(current_time);
         
         self.update_apy_cache();
         
         self.env().emit_event(InterestHarvested {
-            amount: new_interest,
+            amount: new_interest_earned,
             total_interest: simulated_interest,
             timestamp: current_time,
         });
         
         self.reentrancy_guard.exit();
-        Ok(new_interest)
+        new_interest_earned
     }
     
     /// Get current balance
     pub fn get_balance(&self) -> U512 {
-        let position = self.position.get_or_default();
-        position.principal.checked_add(position.interest_accrued).unwrap()
+        let principal = self.principal.get_or_default();
+        let interest = self.interest_accrued.get_or_default();
+        principal.checked_add(interest).unwrap()
     }
     
     /// Get current APY
@@ -323,8 +332,8 @@ impl LendingStrategy {
     }
     
     /// Get risk level (Low for lending)
-    pub fn get_risk_level(&self) -> RiskLevel {
-        RiskLevel::Low
+    pub fn get_risk_level(&self) -> u8 {
+        0 // Low risk (0=Low, 1=Medium, 2=High)
     }
     
     /// Get strategy name
@@ -366,9 +375,9 @@ impl LendingStrategy {
     /// Get pool utilization rate
     /// 
     /// Utilization = Borrowed / (Supplied + Borrowed)
-    fn get_pool_utilization(&self) -> u16 {
+    fn get_pool_utilization(&self) -> u32 {
         
-        7500u16
+        7500u32
     }
     
     /// Update cached APY from lending protocol
@@ -397,7 +406,7 @@ impl LendingStrategy {
         self.access_control.only_admin();
         
         if target_bps > 10000 || max_bps > 10000 || max_bps < target_bps {
-            self.env().revert(StrategyError::Unauthorized);
+            self.env().revert(VaultError::Unauthorized);
         }
         
         self.target_utilization_bps.set(target_bps);
@@ -409,10 +418,7 @@ impl LendingStrategy {
         
         let balance = self.get_balance();
         
-        match self.withdraw(balance) {
-            Ok(amount) => amount,
-            Err(_) => U512::zero(),
-        }
+        self.withdraw(balance)
     }
     
     pub fn pause(&mut self) {
@@ -427,8 +433,10 @@ impl LendingStrategy {
     
     
     pub fn get_position(&self) -> (U512, U512, U512) {
-        let position = self.position.get_or_default();
-        (position.principal, position.interest_accrued, position.c_tokens)
+        let principal = self.principal.get_or_default();
+        let interest = self.interest_accrued.get_or_default();
+        let c_tokens = self.c_tokens.get_or_default();
+        (principal, interest, c_tokens)
     }
     
     pub fn get_total_supplied(&self) -> U512 {
@@ -439,7 +447,7 @@ impl LendingStrategy {
         self.total_interest_earned.get_or_default()
     }
     
-    pub fn get_utilization_rate(&self) -> u16 {
+    pub fn get_utilization_rate(&self) -> u32 {
         self.get_pool_utilization()
     }
 }

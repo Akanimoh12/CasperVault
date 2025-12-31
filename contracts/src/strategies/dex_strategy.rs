@@ -7,8 +7,8 @@ use odra::prelude::*;
 use odra::Event;
 use odra::{Address, SubModule, Var};
 use odra::casper_types::{U256, U512};
-use crate::strategies::strategy_interface::RiskLevel;
-use crate::errors::StrategyError;
+use crate::types::VaultError;
+use crate::strategies::strategy_interface::{RiskLevel, StrategyError};
 use crate::utils::access_control::AccessControl;
 use crate::utils::pausable::Pausable;
 use crate::utils::reentrancy_guard::ReentrancyGuard;
@@ -36,7 +36,7 @@ struct LPPosition {
 }
 
 /// Impermanent loss tracking
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default, odra::OdraType)]
 struct ImpermanentLoss {
     /// Initial value in CSPR
     initial_value: U512,
@@ -65,8 +65,13 @@ pub struct DEXStrategy {
     
     /// CORE STATE
     
-    /// Current LP position
-    lp_position: Var<LPPosition>,
+    /// LP position fields (flattened for Casper serialization)
+    lp_tokens: Var<U512>,
+    lst_cspr_amount: Var<U512>,
+    cspr_amount: Var<U512>,
+    deposit_time: Var<u64>,
+    trading_fees: Var<U512>,
+    mining_rewards: Var<U512>,
     
     /// Total lstCSPR deployed
     total_deployed: Var<U512>,
@@ -134,14 +139,12 @@ impl DEXStrategy {
         self.target_apy_bps.set(U256::from(1500u64)); // 15% target APY
         self.min_harvest_interval.set(43200); // 12 hours
         
-        self.lp_position.set(LPPosition {
-            lp_tokens: U512::zero(),
-            lst_cspr_amount: U512::zero(),
-            cspr_amount: U512::zero(),
-            deposit_time: 0,
-            trading_fees: U512::zero(),
-            mining_rewards: U512::zero(),
-        });
+        self.lp_tokens.set(U512::zero());
+        self.lst_cspr_amount.set(U512::zero());
+        self.cspr_amount.set(U512::zero());
+        self.deposit_time.set(0);
+        self.trading_fees.set(U512::zero());
+        self.mining_rewards.set(U512::zero());
         
         self.total_deployed.set(U512::zero());
         self.total_harvested.set(U512::zero());
@@ -157,21 +160,21 @@ impl DEXStrategy {
     /// 4. Receive LP tokens
     /// 5. Stake LP tokens for rewards
     /// 6. Update position tracking
-    pub fn deploy(&mut self, amount: U512) -> Result<U512, StrategyError> {
+    pub fn deploy(&mut self, amount: U512) -> U512 {
         self.pausable.when_not_paused();
         self.reentrancy_guard.enter();
         
         let min_deploy = self.min_deployment.get_or_default();
         if amount < min_deploy {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::AmountTooLow);
+            return U512::zero(); // Error: AmountTooLow
         }
         
         let current = self.total_deployed.get_or_default();
         let max_cap = self.max_capacity.get_or_default();
         if current.checked_add(amount).unwrap() > max_cap {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::MaxCapacityReached);
+            return U512::zero(); // Error: MaxCapacityReached
         }
         
         let cspr_amount = amount;
@@ -185,12 +188,14 @@ impl DEXStrategy {
         let actual_cspr = cspr_amount;
         
         
-        let mut position = self.lp_position.get_or_default();
-        position.lp_tokens = position.lp_tokens.checked_add(lp_tokens).unwrap();
-        position.lst_cspr_amount = position.lst_cspr_amount.checked_add(actual_lst).unwrap();
-        position.cspr_amount = position.cspr_amount.checked_add(actual_cspr).unwrap();
-        position.deposit_time = self.env().get_block_time();
-        self.lp_position.set(position);
+        let current_lp_tokens = self.lp_tokens.get_or_default();
+        let current_lst = self.lst_cspr_amount.get_or_default();
+        let current_cspr = self.cspr_amount.get_or_default();
+        
+        self.lp_tokens.set(current_lp_tokens.checked_add(lp_tokens).unwrap());
+        self.lst_cspr_amount.set(current_lst.checked_add(actual_lst).unwrap());
+        self.cspr_amount.set(current_cspr.checked_add(actual_cspr).unwrap());
+        self.deposit_time.set(self.env().get_block_time());
         
         let new_total = current.checked_add(actual_lst).unwrap();
         self.total_deployed.set(new_total);
@@ -202,7 +207,7 @@ impl DEXStrategy {
         });
         
         self.reentrancy_guard.exit();
-        Ok(actual_lst)
+        actual_lst
     }
     
     /// Withdraw funds from DEX pool
@@ -213,22 +218,23 @@ impl DEXStrategy {
     /// 3. Remove liquidity from pool
     /// 4. Receive lstCSPR and CSPR
     /// 5. Return lstCSPR to router
-    pub fn withdraw(&mut self, amount: U512) -> Result<U512, StrategyError> {
+    pub fn withdraw(&mut self, amount: U512) -> U512 {
         self.pausable.when_not_paused();
         self.reentrancy_guard.enter();
         
-        let position = self.lp_position.get_or_default();
+        let position_lst = self.lst_cspr_amount.get_or_default();
+        let position_lp_tokens = self.lp_tokens.get_or_default();
         
-        if amount > position.lst_cspr_amount {
+        if amount > position_lst {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::WithdrawalTooLarge);
+            return U512::zero(); // Error: WithdrawalTooLarge
         }
         
-        let lp_to_unstake = if position.lst_cspr_amount.is_zero() {
+        let lp_to_unstake = if position_lst.is_zero() {
             U512::zero()
         } else {
-            amount.checked_mul(position.lp_tokens).unwrap()
-                .checked_div(position.lst_cspr_amount).unwrap()
+            amount.checked_mul(position_lp_tokens).unwrap()
+                .checked_div(position_lst).unwrap()
         };
         
         
@@ -237,11 +243,13 @@ impl DEXStrategy {
         let lst_received = amount;
         let cspr_received = amount; // Assume 1:1 for simplicity
         
-        let mut new_position = position;
-        new_position.lp_tokens = new_position.lp_tokens.checked_sub(lp_to_unstake).unwrap();
-        new_position.lst_cspr_amount = new_position.lst_cspr_amount.checked_sub(lst_received).unwrap();
-        new_position.cspr_amount = new_position.cspr_amount.checked_sub(cspr_received).unwrap();
-        self.lp_position.set(new_position);
+        let current_lp = self.lp_tokens.get_or_default();
+        let current_lst = self.lst_cspr_amount.get_or_default();
+        let current_cspr = self.cspr_amount.get_or_default();
+        
+        self.lp_tokens.set(current_lp.checked_sub(lp_to_unstake).unwrap());
+        self.lst_cspr_amount.set(current_lst.checked_sub(lst_received).unwrap());
+        self.cspr_amount.set(current_cspr.checked_sub(cspr_received).unwrap());
         
         let current = self.total_deployed.get_or_default();
         self.total_deployed.set(current.checked_sub(lst_received).unwrap());
@@ -253,7 +261,7 @@ impl DEXStrategy {
         });
         
         self.reentrancy_guard.exit();
-        Ok(lst_received)
+        lst_received
     }
     
     /// Harvest trading fees and mining rewards
@@ -263,7 +271,7 @@ impl DEXStrategy {
     /// 2. Claim mining rewards from staking
     /// 3. Swap rewards to lstCSPR if needed
     /// 4. Return harvested amount
-    pub fn harvest(&mut self) -> Result<U512, StrategyError> {
+    pub fn harvest(&mut self) -> U512 {
         self.pausable.when_not_paused();
         self.reentrancy_guard.enter();
         
@@ -273,17 +281,18 @@ impl DEXStrategy {
         
         if current_time < last_harvest + min_interval {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::Unauthorized); // Could add specific RateLimitError
+            return U512::zero(); // Error: Unauthorized/RateLimit
         }
         
         
         
-        let position = self.lp_position.get_or_default();
-        let time_elapsed = current_time - position.deposit_time;
+        let position_lst = self.lst_cspr_amount.get_or_default();
+        let position_deposit_time = self.deposit_time.get_or_default();
+        let time_elapsed = current_time - position_deposit_time;
         let annual_apy_bps = 1200u64; // 12%
         let seconds_per_year = 31536000u64;
         
-        let simulated_yield = position.lst_cspr_amount
+        let simulated_yield = position_lst
             .checked_mul(U512::from(annual_apy_bps))
             .unwrap()
             .checked_mul(U512::from(time_elapsed))
@@ -296,10 +305,10 @@ impl DEXStrategy {
         let trading_fees = simulated_yield.checked_div(U512::from(2u64)).unwrap();
         let mining_rewards = simulated_yield.checked_sub(trading_fees).unwrap();
         
-        let mut new_position = position;
-        new_position.trading_fees = new_position.trading_fees.checked_add(trading_fees).unwrap();
-        new_position.mining_rewards = new_position.mining_rewards.checked_add(mining_rewards).unwrap();
-        self.lp_position.set(new_position);
+        let current_trading_fees = self.trading_fees.get_or_default();
+        let current_mining_rewards = self.mining_rewards.get_or_default();
+        self.trading_fees.set(current_trading_fees.checked_add(trading_fees).unwrap());
+        self.mining_rewards.set(current_mining_rewards.checked_add(mining_rewards).unwrap());
         
         let total_yield = trading_fees.checked_add(mining_rewards).unwrap();
         let current_harvested = self.total_harvested.get_or_default();
@@ -314,39 +323,40 @@ impl DEXStrategy {
         });
         
         self.reentrancy_guard.exit();
-        Ok(total_yield)
+        total_yield
     }
     
     /// Get current balance in strategy
     pub fn get_balance(&self) -> U512 {
-        let position = self.lp_position.get_or_default();
+        let lst = self.lst_cspr_amount.get_or_default();
+        let fees = self.trading_fees.get_or_default();
+        let rewards = self.mining_rewards.get_or_default();
         
         // Total value = deployed + accrued rewards
-        position.lst_cspr_amount
-            .checked_add(position.trading_fees)
-            .unwrap()
-            .checked_add(position.mining_rewards)
-            .unwrap()
+        lst.checked_add(fees).unwrap().checked_add(rewards).unwrap()
     }
     
     /// Calculate current APY
     /// 
     /// APY = (total_harvested / total_deployed) * (seconds_per_year / time_elapsed) * 10000
     pub fn get_apy(&self) -> U256 {
-        let position = self.lp_position.get_or_default();
+        let lst = self.lst_cspr_amount.get_or_default();
+        let deposit_time = self.deposit_time.get_or_default();
+        let fees = self.trading_fees.get_or_default();
+        let rewards = self.mining_rewards.get_or_default();
         
-        if position.lst_cspr_amount.is_zero() || position.deposit_time == 0 {
+        if lst.is_zero() || deposit_time == 0 {
             return self.target_apy_bps.get_or_default();
         }
         
         let current_time = self.env().get_block_time();
-        let time_elapsed = current_time - position.deposit_time;
+        let time_elapsed = current_time - deposit_time;
         
         if time_elapsed == 0 {
             return self.target_apy_bps.get_or_default();
         }
         
-        let total_yield = position.trading_fees.checked_add(position.mining_rewards).unwrap();
+        let total_yield = fees.checked_add(rewards).unwrap();
         let seconds_per_year = 31536000u64;
         
         // APY = (yield / deployed) * (1 year / time) * 10000
@@ -355,17 +365,17 @@ impl DEXStrategy {
             .unwrap()
             .checked_mul(U512::from(10000u64))
             .unwrap()
-            .checked_div(position.lst_cspr_amount)
+            .checked_div(lst)
             .unwrap()
             .checked_div(U512::from(time_elapsed))
             .unwrap();
         
-        U256::try_from(apy).unwrap_or(self.target_apy_bps.get_or_default())
+        U256::from(apy.as_u128())
     }
     
     /// Get risk level (Medium for DEX LPs)
-    pub fn get_risk_level(&self) -> RiskLevel {
-        RiskLevel::Medium
+    pub fn get_risk_level(&self) -> u8 {
+        1 // Medium risk (0=Low, 1=Medium, 2=High)
     }
     
     /// Get strategy name
@@ -403,9 +413,10 @@ impl DEXStrategy {
     /// 
     /// IL = (2 * sqrt(price_ratio) / (1 + price_ratio)) - 1
     pub fn calculate_impermanent_loss(&self) -> ImpermanentLoss {
-        let position = self.lp_position.get_or_default();
+        let lst = self.lst_cspr_amount.get_or_default();
+        let cspr = self.cspr_amount.get_or_default();
         
-        if position.lst_cspr_amount.is_zero() || position.cspr_amount.is_zero() {
+        if lst.is_zero() || cspr.is_zero() {
             return ImpermanentLoss {
                 initial_value: U512::zero(),
                 current_value: U512::zero(),
@@ -414,14 +425,15 @@ impl DEXStrategy {
         }
         
         // Initial value (assuming 1:1 ratio at deposit)
-        let initial_value = position.lst_cspr_amount
-            .checked_add(position.cspr_amount)
-            .unwrap();
+        let initial_value = lst.checked_add(cspr).unwrap();
+        
+        let trading_fees = self.trading_fees.get_or_default();
+        let mining_rewards = self.mining_rewards.get_or_default();
         
         let current_value = initial_value
-            .checked_add(position.trading_fees)
+            .checked_add(trading_fees)
             .unwrap()
-            .checked_add(position.mining_rewards)
+            .checked_add(mining_rewards)
             .unwrap();
         
         let diff = if current_value > initial_value {
@@ -462,7 +474,7 @@ impl DEXStrategy {
         
         // Max 5% slippage
         if slippage_bps > 500 {
-            self.env().revert(StrategyError::Unauthorized);
+            self.env().revert(VaultError::Unauthorized);
         }
         
         self.max_slippage_bps.set(slippage_bps);
@@ -472,14 +484,10 @@ impl DEXStrategy {
     pub fn emergency_withdraw(&mut self) -> U512 {
         self.access_control.only_admin();
         
-        let position = self.lp_position.get_or_default();
-        let total = position.lst_cspr_amount;
+        let total = self.lst_cspr_amount.get_or_default();
         
         // Attempt withdrawal of all funds
-        match self.withdraw(total) {
-            Ok(amount) => amount,
-            Err(_) => U512::zero(),
-        }
+        self.withdraw(total)
     }
     
     /// Pause strategy
@@ -496,8 +504,10 @@ impl DEXStrategy {
     
     
     pub fn get_lp_position(&self) -> (U512, U512, U512) {
-        let position = self.lp_position.get_or_default();
-        (position.lp_tokens, position.lst_cspr_amount, position.cspr_amount)
+        let lp_tokens = self.lp_tokens.get_or_default();
+        let lst = self.lst_cspr_amount.get_or_default();
+        let cspr = self.cspr_amount.get_or_default();
+        (lp_tokens, lst, cspr)
     }
     
     pub fn get_total_deployed(&self) -> U512 {
@@ -509,8 +519,9 @@ impl DEXStrategy {
     }
     
     pub fn get_rewards_accrued(&self) -> (U512, U512) {
-        let position = self.lp_position.get_or_default();
-        (position.trading_fees, position.mining_rewards)
+        let trading_fees = self.trading_fees.get_or_default();
+        let mining_rewards = self.mining_rewards.get_or_default();
+        (trading_fees, mining_rewards)
     }
 }
 

@@ -215,7 +215,10 @@ impl StrategyRouter {
                 U256::from(1000u64) // 10%
             };
             
-            let weight = (U256::from(allocation) * U256::from(10000u64)) / U256::from(total_allocated);
+            // Convert U512 to U256 for calculations (using as_u128 which is safe for small values)
+            let allocation_u256 = U256::from(allocation.as_u128());
+            let total_allocated_u256 = U256::from(total_allocated.as_u128());
+            let weight = (allocation_u256 * U256::from(10000u64)) / total_allocated_u256;
             
             // Add weighted APY
             weighted_apy += (strategy_apy * weight) / U256::from(10000u64);
@@ -266,7 +269,7 @@ impl StrategyRouter {
         for (strategy_name, pct) in allocations.iter() {
             // Validate constraints
             if *pct > max_strategy {
-                self.env().revert(StrategyError::AllocationExceedsMax);
+                self.env().revert(VaultError::InvalidRequest);
             }
             
             if strategy_name == "crosschain" {
@@ -281,12 +284,12 @@ impl StrategyRouter {
         
         // Validate total = 100%
         if total_pct != 100 {
-            self.env().revert(StrategyError::InvalidTotalAllocation);
+            self.env().revert(VaultError::InvalidRequest);
         }
         
         // Validate cross-chain limit
         if crosschain_pct > max_crosschain as u16 {
-            self.env().revert(StrategyError::CrossChainExceedsMax);
+            self.env().revert(VaultError::InvalidRequest);
         }
     }
 

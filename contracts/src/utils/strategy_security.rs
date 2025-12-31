@@ -31,8 +31,21 @@ pub struct StrategyHealth {
 
 #[odra::module]
 pub struct StrategySecurity {
-    strategy_health: Mapping<Address, StrategyHealth>,
-    risk_scores: Mapping<Address, RiskScore>,
+    // StrategyHealth fields - flattened
+    strategy_last_check: Mapping<Address, u64>,
+    strategy_status: Mapping<Address, u8>, // 0=Healthy, 1=Warning, 2=Critical, 3=Unresponsive
+    strategy_reported_balance: Mapping<Address, U512>,
+    strategy_actual_balance: Mapping<Address, U512>,
+    strategy_apy: Mapping<Address, u32>,
+    strategy_failures: Mapping<Address, u8>,
+    
+    // RiskScore fields - flattened
+    risk_score: Mapping<Address, u8>,
+    risk_tvl_score: Mapping<Address, u8>,
+    risk_audit_score: Mapping<Address, u8>,
+    risk_age_score: Mapping<Address, u8>,
+    risk_performance_score: Mapping<Address, u8>,
+    
     max_risk_threshold: Var<u8>,
     health_check_interval: Var<u64>,
     max_apy_threshold: Var<u32>,
@@ -48,30 +61,24 @@ impl StrategySecurity {
         self.min_apy_threshold.set(100);
     }
     
-    pub fn health_check(&mut self, strategy: Address) -> HealthStatus {
+    pub fn health_check(&mut self, strategy: Address) -> u8 {
         let current_time = self.env().get_block_time();
-        let mut health = self.strategy_health.get(&strategy).unwrap_or(StrategyHealth {
-            last_check: 0,
-            status: HealthStatus::Healthy,
-            reported_balance: U512::zero(),
-            actual_balance: U512::zero(),
-            apy: 0,
-            consecutive_failures: 0,
-        });
+        let last_check = self.strategy_last_check.get(&strategy).unwrap_or(0);
+        let consecutive_failures = self.strategy_failures.get(&strategy).unwrap_or(0);
+        let apy = self.strategy_apy.get(&strategy).unwrap_or(0);
         
-        let status = if health.consecutive_failures >= 3 {
-            HealthStatus::Critical
-        } else if health.consecutive_failures >= 2 {
-            HealthStatus::Warning
-        } else if self.check_apy_in_range(health.apy) {
-            HealthStatus::Healthy
+        let status = if consecutive_failures >= 3 {
+            2u8 // Critical
+        } else if consecutive_failures >= 2 {
+            1u8 // Warning
+        } else if self.check_apy_in_range(apy) {
+            0u8 // Healthy
         } else {
-            HealthStatus::Warning
+            1u8 // Warning
         };
         
-        health.status = status;
-        health.last_check = current_time;
-        self.strategy_health.set(&strategy, health);
+        self.strategy_status.set(&strategy, status);
+        self.strategy_last_check.set(&strategy, current_time);
         
         self.env().emit_event(HealthCheckPerformed {
             strategy,
@@ -82,33 +89,24 @@ impl StrategySecurity {
         status
     }
     
-    pub fn risk_assessment(&mut self, strategy: Address) -> RiskScore {
-        let health = self.strategy_health.get(&strategy).unwrap_or(StrategyHealth {
-            last_check: 0,
-            status: HealthStatus::Healthy,
-            reported_balance: U512::zero(),
-            actual_balance: U512::zero(),
-            apy: 800,
-            consecutive_failures: 0,
-        });
+    pub fn risk_assessment(&mut self, strategy: Address) -> u8 {
+        let actual_balance = self.strategy_actual_balance.get(&strategy).unwrap_or(U512::zero());
+        let consecutive_failures = self.strategy_failures.get(&strategy).unwrap_or(0);
         
-        let tvl_score = self.calculate_tvl_score(health.actual_balance);
+        let tvl_score = self.calculate_tvl_score(actual_balance);
         let audit_score = 20;
         let age_score = 15;
-        let performance_score = if health.consecutive_failures == 0 { 25 } else { 0 };
+        let performance_score = if consecutive_failures == 0 { 25 } else { 0 };
         
         let total_score = tvl_score + audit_score + age_score + performance_score;
         
-        let risk_score = RiskScore {
-            score: total_score,
-            tvl_score,
-            audit_score,
-            age_score,
-            performance_score,
-        };
+        self.risk_score.set(&strategy, total_score);
+        self.risk_tvl_score.set(&strategy, tvl_score);
+        self.risk_audit_score.set(&strategy, audit_score);
+        self.risk_age_score.set(&strategy, age_score);
+        self.risk_performance_score.set(&strategy, performance_score);
         
-        self.risk_scores.set(&strategy, risk_score);
-        risk_score
+        total_score
     }
     
     fn calculate_tvl_score(&self, tvl: U512) -> u8 {
@@ -131,63 +129,34 @@ impl StrategySecurity {
     }
     
     pub fn should_withdraw(&self, strategy: Address) -> bool {
-        if let Some(risk_score) = self.risk_scores.get(&strategy) {
+        if let Some(risk_score_value) = self.risk_score.get(&strategy) {
             let threshold = self.max_risk_threshold.get_or_default();
-            if risk_score.score > threshold {
+            if risk_score_value > threshold {
                 return true;
             }
         }
         
-        if let Some(health) = self.strategy_health.get(&strategy) {
-            if matches!(health.status, HealthStatus::Critical) {
-                return true;
-            }
+        let status = self.strategy_status.get(&strategy).unwrap_or(0);
+        if status == 2 { // Critical
+            return true;
         }
         
         false
     }
     
     pub fn record_failure(&mut self, strategy: Address) {
-        let mut health = self.strategy_health.get(&strategy).unwrap_or(StrategyHealth {
-            last_check: self.env().get_block_time(),
-            status: HealthStatus::Healthy,
-            reported_balance: U512::zero(),
-            actual_balance: U512::zero(),
-            apy: 0,
-            consecutive_failures: 0,
-        });
-        
-        health.consecutive_failures += 1;
-        self.strategy_health.set(&strategy, health);
+        let failures = self.strategy_failures.get(&strategy).unwrap_or(0);
+        self.strategy_failures.set(&strategy, failures + 1);
     }
     
     pub fn record_success(&mut self, strategy: Address) {
-        let mut health = self.strategy_health.get(&strategy).unwrap_or(StrategyHealth {
-            last_check: self.env().get_block_time(),
-            status: HealthStatus::Healthy,
-            reported_balance: U512::zero(),
-            actual_balance: U512::zero(),
-            apy: 0,
-            consecutive_failures: 0,
-        });
-        
-        health.consecutive_failures = 0;
-        self.strategy_health.set(&strategy, health);
+        self.strategy_failures.set(&strategy, 0);
+        self.strategy_status.set(&strategy, 0); // Healthy
     }
     
     pub fn update_balance(&mut self, strategy: Address, reported: U512, actual: U512) {
-        let mut health = self.strategy_health.get(&strategy).unwrap_or(StrategyHealth {
-            last_check: self.env().get_block_time(),
-            status: HealthStatus::Healthy,
-            reported_balance: U512::zero(),
-            actual_balance: U512::zero(),
-            apy: 0,
-            consecutive_failures: 0,
-        });
-        
-        health.reported_balance = reported;
-        health.actual_balance = actual;
-        self.strategy_health.set(&strategy, health);
+        self.strategy_reported_balance.set(&strategy, reported);
+        self.strategy_actual_balance.set(&strategy, actual);
     }
     
     pub fn set_max_risk_threshold(&mut self, threshold: u8) {
@@ -198,6 +167,6 @@ impl StrategySecurity {
 #[derive(Event, Debug, PartialEq, Eq)]
 pub struct HealthCheckPerformed {
     pub strategy: Address,
-    pub status: HealthStatus,
+    pub status: u8, // 0=Healthy, 1=Warning, 2=Critical, 3=Unresponsive
     pub timestamp: u64,
 }

@@ -88,8 +88,8 @@ impl MockDEX {
         self.reserve_b.set(reserve_b - final_amount);
         
         self.env().emit_event(SwapExecuted {
-            token_in: Address::from([0u8; 32]), // Mock address
-            token_out: Address::from([1u8; 32]), // Mock address
+            token_in: self.env().caller(),
+            token_out: self.env().caller(),
             amount_in,
             amount_out: final_amount,
             fee,
@@ -133,8 +133,8 @@ impl MockDEX {
         self.reserve_a.set(reserve_a - final_amount);
         
         self.env().emit_event(SwapExecuted {
-            token_in: Address::from([1u8; 32]),
-            token_out: Address::from([0u8; 32]),
+            token_in: self.env().caller(),
+            token_out: self.env().caller(),
             amount_in,
             amount_out: final_amount,
             fee,

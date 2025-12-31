@@ -13,9 +13,9 @@ pub enum AlertType {
     BridgeAnomaly,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, odra::OdraType)]
 pub struct AlertData {
-    pub alert_type: AlertType,
+    pub alert_type: u8,  // Changed from AlertType enum to u8
     pub severity: u8,
     pub description: Address,
     pub value: U512,
@@ -42,7 +42,7 @@ impl Monitor {
         self.failed_tx_window_start.set(self.env().get_block_time());
     }
     
-    pub fn emit_alert(&mut self, alert_type: AlertType, severity: u8, related_address: Address, value: U512) {
+    pub fn emit_alert(&mut self, alert_type: u8, severity: u8, related_address: Address, value: U512) {
         let current_time = self.env().get_block_time();
         let alert = AlertData {
             alert_type,
@@ -75,7 +75,7 @@ impl Monitor {
         
         if percentage >= ten_percent {
             self.emit_alert(
-                AlertType::UnusualWithdrawal,
+                0, // AlertType::UnusualWithdrawal
                 8,
                 self.env().caller(),
                 amount
@@ -108,9 +108,9 @@ impl Monitor {
             
             if percentage >= twenty_percent {
                 self.emit_alert(
-                    AlertType::UnusualWithdrawal,
+                    0, // AlertType::UnusualWithdrawal
                     9,
-                    Address::from([0u8; 32]),
+                    self.env().caller(),
                     decrease
                 );
                 self.last_tvl.set(current_tvl);
@@ -137,9 +137,9 @@ impl Monitor {
             
             if count + 1 >= 10 {
                 self.emit_alert(
-                    AlertType::FailedTransactionSpike,
+                    3, // AlertType::FailedTransactionSpike
                     7,
-                    Address::from([0u8; 32]),
+                    self.env().caller(),
                     U512::from(count + 1)
                 );
             }
@@ -157,7 +157,7 @@ impl Monitor {
 
 #[derive(Event, Debug, PartialEq, Eq)]
 pub struct AlertEmitted {
-    pub alert_type: AlertType,
+    pub alert_type: u8,  // Changed from AlertType enum to u8
     pub severity: u8,
     pub related_address: Address,
     pub value: U512,

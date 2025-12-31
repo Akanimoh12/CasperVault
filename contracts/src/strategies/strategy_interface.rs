@@ -230,7 +230,7 @@ impl StrategyMetadata {
     /// # Returns
     /// `true` if utilization >= threshold
     pub fn is_near_capacity(&self, threshold_bps: u32) -> bool {
-        self.utilization_bps() >= threshold_bps
+        self.utilization_bps() as u32 >= threshold_bps
     }
 }
 

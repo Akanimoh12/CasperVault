@@ -1,0 +1,25 @@
+# Odra Configuration for CasperVault
+
+[workspace]
+members = [
+    "vault_manager",
+    "liquid_staking",
+    "lst_cspr",
+    "cv_cspr",
+    "dex_strategy",
+    "lending_strategy",
+    "crosschain_strategy"
+]
+
+[network.casper-test]
+node_address = "http://3.143.158.19:7777"
+chain_name = "casper-test"
+
+[network.casper-main]
+node_address = "http://65.21.235.219:7777"
+chain_name = "casper"
+
+[build]
+# WASM optimization settings
+wasm-opt = true
+wasm-strip = true

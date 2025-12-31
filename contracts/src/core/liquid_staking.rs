@@ -6,7 +6,7 @@ use crate::types::*;
 use crate::utils::{AccessControl, ValidatorRegistry};
 
 /// Delegation tracking for unbonding
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, odra::OdraType)]
 pub struct UnbondingRequest {
     pub user: Address,
     pub validator: Address,
@@ -16,7 +16,7 @@ pub struct UnbondingRequest {
 }
 
 /// Validator information
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, odra::OdraType)]
 pub struct ValidatorInfo {
     pub uptime_percentage: u8,
     pub commission_rate: u8,
@@ -66,8 +66,12 @@ pub struct LiquidStaking {
     /// Delegation amounts per validator
     delegations: Mapping<Address, U512>,
     
-    /// Unbonding requests (request_id -> UnbondingRequest)
-    unbonding_requests: Mapping<U256, UnbondingRequest>,
+    /// Unbonding requests - flattened (request_id -> fields)
+    unbonding_request_users: Mapping<U256, Address>,
+    unbonding_request_validators: Mapping<U256, Address>,
+    unbonding_request_amounts: Mapping<U256, U512>,
+    unbonding_request_unlock_times: Mapping<U256, u64>,
+    unbonding_request_completed: Mapping<U256, bool>,
     
     /// Next unbonding request ID
     next_unbonding_id: Var<U256>,
@@ -223,16 +227,14 @@ impl LiquidStaking {
         // Create unbonding request
         let request_id = self.next_unbonding_id.get_or_default();
         let unlock_time = self.env().get_block_time() + self.unbonding_period.get_or_default();
+        let placeholder_validator = self.env().caller();
         
-        let request = UnbondingRequest {
-            user: caller,
-            validator: self.env().caller(), // Use caller as placeholder since Address has no zero()
-            amount: cspr_amount,
-            unlock_time,
-            is_completed: false,
-        };
+        self.unbonding_request_users.set(&request_id, caller);
+        self.unbonding_request_validators.set(&request_id, placeholder_validator);
+        self.unbonding_request_amounts.set(&request_id, cspr_amount);
+        self.unbonding_request_unlock_times.set(&request_id, unlock_time);
+        self.unbonding_request_completed.set(&request_id, false);
         
-        self.unbonding_requests.set(&request_id, request);
         self.next_unbonding_id.set(request_id + U256::one());
         
         self.env().emit_event(Unstake {
@@ -249,26 +251,29 @@ impl LiquidStaking {
     /// 
     /// Can only be called after unbonding period has passed
     pub fn complete_unbonding(&mut self, request_id: U256) -> U512 {
-        let mut request = self.unbonding_requests.get(&request_id)
+        let request_user = self.unbonding_request_users.get(&request_id)
             .unwrap_or_else(|| self.env().revert(VaultError::WithdrawalRequestNotFound));
         
-        if request.user != self.env().caller() {
+        let request_amount = self.unbonding_request_amounts.get(&request_id).unwrap_or(U512::zero());
+        let request_unlock_time = self.unbonding_request_unlock_times.get(&request_id).unwrap_or(0);
+        let request_completed = self.unbonding_request_completed.get(&request_id).unwrap_or(false);
+        
+        if request_user != self.env().caller() {
             self.env().revert(VaultError::Unauthorized);
         }
         
-        if request.is_completed {
+        if request_completed {
             self.env().revert(VaultError::WithdrawalRequestNotFound);
         }
         
-        if self.env().get_block_time() < request.unlock_time {
+        if self.env().get_block_time() < request_unlock_time {
             self.env().revert(VaultError::TimelockNotExpired);
         }
         
-        request.is_completed = true;
-        self.unbonding_requests.set(&request_id, request);
+        self.unbonding_request_completed.set(&request_id, true);
         
         
-        request.amount
+        request_amount
     }
 
     /// Compound staking rewards
@@ -580,7 +585,17 @@ impl LiquidStaking {
 
     /// Get unbonding request details
     pub fn get_unbonding_request(&self, request_id: U256) -> Option<UnbondingRequest> {
-        self.unbonding_requests.get(&request_id)
+        if let Some(user) = self.unbonding_request_users.get(&request_id) {
+            Some(UnbondingRequest {
+                user,
+                validator: self.unbonding_request_validators.get(&request_id).unwrap_or(user),
+                amount: self.unbonding_request_amounts.get(&request_id).unwrap_or(U512::zero()),
+                unlock_time: self.unbonding_request_unlock_times.get(&request_id).unwrap_or(0),
+                is_completed: self.unbonding_request_completed.get(&request_id).unwrap_or(false),
+            })
+        } else {
+            None
+        }
     }
 
     /// Calculate APY based on recent rewards

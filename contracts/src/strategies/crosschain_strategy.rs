@@ -7,7 +7,8 @@ use odra::prelude::*;
 use odra::Event;
 use odra::{Address, Mapping, SubModule, Var};
 use odra::casper_types::{U256, U512};
-use crate::strategies::strategy_interface::{IStrategy, RiskLevel, StrategyError};
+use crate::types::VaultError;
+use crate::strategies::strategy_interface::{RiskLevel, StrategyError};
 use crate::utils::access_control::AccessControl;
 use crate::utils::pausable::Pausable;
 use crate::utils::reentrancy_guard::ReentrancyGuard;
@@ -77,8 +78,12 @@ pub struct CrossChainStrategy {
     
     /// CORE STATE
     
-    /// Current cross-chain positions by chain
-    positions: Mapping<u8, CrossChainPosition>, // u8 = TargetChain as discriminant
+    /// Current cross-chain positions by chain (flattened)
+    bridged_amounts: Mapping<u8, U512>, // Amount bridged per chain
+    deployed_amounts: Mapping<u8, U512>, // Deployed amount per chain
+    yields_accrued: Mapping<u8, U512>, // Yields per chain
+    bridge_times: Mapping<u8, u64>, // Bridge timestamp per chain
+    bridge_statuses: Mapping<u8, u8>, // Status: 0=Initiated, 1=Confirmed, 2=Deployed, 3=Harvesting, 4=Withdrawing, 5=Completed, 6=Failed
     
     /// Total bridged (lifetime)
     total_bridged: Var<U512>,
@@ -151,21 +156,21 @@ impl CrossChainStrategy {
     /// 2. Emit BridgeInitiated event
     /// 3. Store bridged amount in state
     /// 4. Simulate deployment on target chain
-    pub fn deploy(&mut self, amount: U512) -> Result<U512, StrategyError> {
+    pub fn deploy(&mut self, amount: U512) -> U512 {
         self.pausable.when_not_paused();
         self.reentrancy_guard.enter();
         
         let min = self.min_bridge_amount.get_or_default();
         if amount < min {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::AmountTooLow);
+            return U512::zero(); // Error: AmountTooLow
         }
         
         let current_total = self.get_balance();
         let max_cap = self.max_capacity.get_or_default();
         if current_total.checked_add(amount).unwrap() > max_cap {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::MaxCapacityReached);
+            return U512::zero(); // Error: MaxCapacityReached
         }
         
         let fee_bps = self.bridge_fee_bps.get_or_default();
@@ -177,46 +182,42 @@ impl CrossChainStrategy {
         
         let amount_after_fee = amount.checked_sub(bridge_fee).unwrap();
         
-        //     amount_after_fee,
-        //     target_chain,
-        //     target_protocol
-        // );
+        let chain_id = 0u8; // 0 = Ethereum
+        let current_time = self.env().get_block_time();
         
-        let target_chain = TargetChain::Ethereum;
-        let chain_id = target_chain as u8;
+        // Update or create position using individual Mappings
+        let existing_bridged = self.bridged_amounts.get(&chain_id).unwrap_or(U512::zero());
+        let existing_deployed = self.deployed_amounts.get(&chain_id).unwrap_or(U512::zero());
         
-        let position = CrossChainPosition {
-            bridged_amount: amount_after_fee,
-            target_chain,
-            bridge_time: self.env().get_block_time(),
-            deployed_amount: amount_after_fee,
-            yields_accrued: U512::zero(),
-            bridge_tx_hash: format!("0xsimulated{}", self.env().get_block_time()),
-            status: BridgeStatus::Deployed,
-        };
+        let new_bridged = existing_bridged.checked_add(amount_after_fee).unwrap();
+        let new_deployed = existing_deployed.checked_add(amount_after_fee).unwrap();
         
-        let existing = self.positions.get(&chain_id);
-        if let Some(mut existing_pos) = existing {
-            existing_pos.bridged_amount = existing_pos.bridged_amount.checked_add(amount_after_fee).unwrap();
-            existing_pos.deployed_amount = existing_pos.deployed_amount.checked_add(amount_after_fee).unwrap();
-            self.positions.set(&chain_id, existing_pos);
-        } else {
-            self.positions.set(&chain_id, position);
-        }
+        self.bridged_amounts.set(&chain_id, new_bridged);
+        self.deployed_amounts.set(&chain_id, new_deployed);
+        self.yields_accrued.set(&chain_id, self.yields_accrued.get(&chain_id).unwrap_or(U512::zero()));
+        self.bridge_times.set(&chain_id, current_time);
+        self.bridge_statuses.set(&chain_id, 2u8); // 2 = Deployed
         
         let total = self.total_bridged.get_or_default();
         self.total_bridged.set(total.checked_add(amount_after_fee).unwrap());
         
+        let chain_name = match chain_id {
+            0 => "Ethereum",
+            1 => "Polygon",
+            2 => "Avalanche",
+            _ => "Unknown",
+        };
+        
         self.env().emit_event(BridgeInitiated {
             amount: amount_after_fee,
             fee: bridge_fee,
-            target_chain: format!("{:?}", target_chain),
+            target_chain: chain_name.to_string(),
             bridge_tx: format!("0xsimulated{}", self.env().get_block_time()),
             timestamp: self.env().get_block_time(),
         });
         
         self.reentrancy_guard.exit();
-        Ok(amount_after_fee)
+        amount_after_fee
     }
     
     /// Withdraw funds from cross-chain strategy
@@ -225,7 +226,7 @@ impl CrossChainStrategy {
     /// 1. Initiate withdrawal on target chain
     /// 2. Wait for bridge confirmation
     /// 3. Receive lstCSPR back
-    pub fn withdraw(&mut self, amount: U512) -> Result<U512, StrategyError> {
+    pub fn withdraw(&mut self, amount: U512) -> U512 {
         self.pausable.when_not_paused();
         self.reentrancy_guard.enter();
         
@@ -233,23 +234,30 @@ impl CrossChainStrategy {
         
         if amount > total_balance {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::WithdrawalTooLarge);
+            return U512::zero(); // Error: WithdrawalTooLarge
         }
         
         
-        let chain_id = TargetChain::Ethereum as u8;
-        let mut position = self.positions.get(&chain_id)
-            .ok_or(StrategyError::InsufficientBalance)?;
+        let chain_id = 0u8; // Ethereum
         
-        if amount > position.deployed_amount {
+        let deployed = self.deployed_amounts.get(&chain_id).unwrap_or(U512::zero());
+        if deployed.is_zero() {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::WithdrawalTooLarge);
+            return U512::zero(); // Error: InsufficientBalance
         }
         
-        position.deployed_amount = position.deployed_amount.checked_sub(amount).unwrap();
-        position.bridged_amount = position.bridged_amount.checked_sub(amount).unwrap();
-        position.status = BridgeStatus::Withdrawing;
-        self.positions.set(&chain_id, position);
+        if amount > deployed {
+            self.reentrancy_guard.exit();
+            return U512::zero(); // Error: WithdrawalTooLarge
+        }
+        
+        let bridged = self.bridged_amounts.get(&chain_id).unwrap_or(U512::zero());
+        let new_deployed = deployed.checked_sub(amount).unwrap();
+        let new_bridged = bridged.checked_sub(amount).unwrap();
+        
+        self.deployed_amounts.set(&chain_id, new_deployed);
+        self.bridged_amounts.set(&chain_id, new_bridged);
+        self.bridge_statuses.set(&chain_id, 4u8); // 4 = Withdrawing
         
         self.env().emit_event(WithdrawalInitiated {
             amount,
@@ -258,7 +266,7 @@ impl CrossChainStrategy {
         });
         
         self.reentrancy_guard.exit();
-        Ok(amount)
+        amount
     }
     
     /// Harvest yields from cross-chain deployments
@@ -267,7 +275,7 @@ impl CrossChainStrategy {
     /// 1. Query yields on target chains
     /// 2. Claim rewards
     /// 3. Bridge back or compound on target chain
-    pub fn harvest(&mut self) -> Result<U512, StrategyError> {
+    pub fn harvest(&mut self) -> U512 {
         self.pausable.when_not_paused();
         self.reentrancy_guard.enter();
         
@@ -277,26 +285,27 @@ impl CrossChainStrategy {
         
         if current_time < last_harvest + min_interval {
             self.reentrancy_guard.exit();
-            return Err(StrategyError::Unauthorized);
+            return U512::zero(); // Error: Unauthorized
         }
         
         // This is complex as it requires cross-chain message passing
         
-        let chain_id = TargetChain::Ethereum as u8;
-        let position_opt = self.positions.get(&chain_id);
+        let chain_id = 0u8; // Ethereum
         
-        if position_opt.is_none() {
+        let deployed = self.deployed_amounts.get(&chain_id).unwrap_or(U512::zero());
+        if deployed.is_zero() {
             self.reentrancy_guard.exit();
-            return Ok(U512::zero());
+            return U512::zero();
         }
         
-        let position = position_opt.unwrap();
+        let bridge_time = self.bridge_times.get(&chain_id).unwrap_or(0);
+        let yields = self.yields_accrued.get(&chain_id).unwrap_or(U512::zero());
         
-        let time_elapsed = current_time - position.bridge_time;
+        let time_elapsed = current_time - bridge_time;
         let annual_apy_bps = 1800u64; // 18%
         let seconds_per_year = 31536000u64;
         
-        let simulated_yield = position.deployed_amount
+        let simulated_yield = deployed
             .checked_mul(U512::from(annual_apy_bps))
             .unwrap()
             .checked_mul(U512::from(time_elapsed))
@@ -306,16 +315,14 @@ impl CrossChainStrategy {
             .checked_div(U512::from(10000u64))
             .unwrap();
         
-        let new_yield = if simulated_yield > position.yields_accrued {
-            simulated_yield.checked_sub(position.yields_accrued).unwrap()
+        let new_yield = if simulated_yield > yields {
+            simulated_yield.checked_sub(yields).unwrap()
         } else {
             U512::zero()
         };
         
-        let mut new_position = position;
-        new_position.yields_accrued = simulated_yield;
-        new_position.status = BridgeStatus::Deployed;
-        self.positions.set(&chain_id, new_position);
+        self.yields_accrued.set(&chain_id, simulated_yield);
+        self.bridge_statuses.set(&chain_id, 2u8); // 2 = Deployed
         
         let total = self.total_yields.get_or_default();
         self.total_yields.set(total.checked_add(new_yield).unwrap());
@@ -329,19 +336,19 @@ impl CrossChainStrategy {
         });
         
         self.reentrancy_guard.exit();
-        Ok(new_yield)
+        new_yield
     }
     
     /// Get current balance across all chains
     pub fn get_balance(&self) -> U512 {
         let mut total = U512::zero();
         
-        // Sum across all chains
-        for chain in [TargetChain::Ethereum, TargetChain::Polygon] {
-            if let Some(position) = self.positions.get(&(chain as u8)) {
-                total = total.checked_add(position.deployed_amount).unwrap();
-                total = total.checked_add(position.yields_accrued).unwrap();
-            }
+        // Sum up deployed amounts and yields across all chains
+        for chain in 0u8..4u8 { // 0=Ethereum, 1=Polygon, 2=Arbitrum, 3=Optimism
+            let deployed = self.deployed_amounts.get(&chain).unwrap_or(U512::zero());
+            let yields = self.yields_accrued.get(&chain).unwrap_or(U512::zero());
+            total = total.checked_add(deployed).unwrap();
+            total = total.checked_add(yields).unwrap();
         }
         
         total
@@ -353,8 +360,8 @@ impl CrossChainStrategy {
     }
     
     /// Get risk level (High for cross-chain)
-    pub fn get_risk_level(&self) -> RiskLevel {
-        RiskLevel::High
+    pub fn get_risk_level(&self) -> u8 {
+        2 // High risk (0=Low, 1=Medium, 2=High)
     }
     
     /// Get strategy name
@@ -392,7 +399,7 @@ impl CrossChainStrategy {
         
         // Max 2% bridge fee
         if fee_bps > 200 {
-            self.env().revert(StrategyError::Unauthorized);
+            self.env().revert(VaultError::Unauthorized);
         }
         
         self.bridge_fee_bps.set(fee_bps);
@@ -405,10 +412,7 @@ impl CrossChainStrategy {
         
         // from all target chains, potentially with losses
         
-        match self.withdraw(balance) {
-            Ok(amount) => amount,
-            Err(_) => U512::zero(),
-        }
+        self.withdraw(balance)
     }
     
     pub fn pause(&mut self) {
@@ -423,9 +427,14 @@ impl CrossChainStrategy {
     
     
     pub fn get_position(&self, target_chain: u8) -> Option<(U512, U512, U512)> {
-        self.positions.get(&target_chain).map(|pos| {
-            (pos.bridged_amount, pos.deployed_amount, pos.yields_accrued)
-        })
+        let bridged = self.bridged_amounts.get(&target_chain);
+        if bridged.is_some() {
+            let deployed = self.deployed_amounts.get(&target_chain).unwrap_or(U512::zero());
+            let yields = self.yields_accrued.get(&target_chain).unwrap_or(U512::zero());
+            Some((bridged.unwrap(), deployed, yields))
+        } else {
+            None
+        }
     }
     
     pub fn get_total_bridged(&self) -> U512 {
@@ -436,7 +445,7 @@ impl CrossChainStrategy {
         self.total_yields.get_or_default()
     }
     
-    pub fn get_bridge_fee_bps(&self) -> u16 {
+    pub fn get_bridge_fee_bps(&self) -> u32 {
         self.bridge_fee_bps.get_or_default()
     }
 }
