@@ -33,27 +33,7 @@ echo ""
 
 # Get account info and balance
 echo "💰 Checking account balance..."
-ACCOUNT_INFO=$(casper-client get-account-info \
-    --node-address "$NODE_URL" \
-    --public-key "$PUBLIC_KEY" 2>&1) || {
-    echo "⚠️  Account not found on testnet"
-    echo ""
-    echo "📝 Next steps:"
-    echo "  1. Get test CSPR from faucet:"
-    echo "     https://testnet.cspr.live/tools/faucet"
-    echo ""
-    echo "  2. Your public key (paste this in the faucet):"
-    echo "     $PUBLIC_KEY"
-    echo ""
-    echo "  3. Wait for funds to arrive (~1-2 minutes)"
-    echo ""
-    echo "  4. Run this script again: ./testnet-deploy.sh"
-    echo ""
-    exit 0
-}
-
-echo "✅ Account found!"
-echo "$ACCOUNT_INFO" | grep -i "balance\|purse"
+echo "   Verify your balance at: https://testnet.cspr.live/account/$PUBLIC_KEY"
 echo ""
 
 # Build contracts
