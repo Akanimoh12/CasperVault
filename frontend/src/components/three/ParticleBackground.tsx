@@ -1,8 +1,21 @@
 /// <reference types="@react-three/fiber" />
 import { useEffect, useRef, useMemo } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, extend } from '@react-three/fiber';
 import { Points, PointMaterial } from '@react-three/drei';
 import * as THREE from 'three';
+
+// Extend Three.js classes for JSX
+extend({ LineSegments: THREE.LineSegments, LineBasicMaterial: THREE.LineBasicMaterial });
+
+// Type augmentation for custom elements
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      lineSegments: any;
+      lineBasicMaterial: any;
+    }
+  }
+}
 
 interface ParticlesProps {
   count?: number;
@@ -155,14 +168,17 @@ const ParticleConnections = () => {
   }, []);
 
   return (
-    <lineSegments ref={ref} geometry={lineGeometry}>
-      <lineBasicMaterial 
-        color="#38bdf8" 
-        transparent 
-        opacity={0.08} 
-        blending={THREE.AdditiveBlending}
-      />
-    </lineSegments>
+    <>
+      {/* @ts-ignore - Three.js JSX elements */}
+      <lineSegments ref={ref} geometry={lineGeometry}>
+        <lineBasicMaterial 
+          color="#38bdf8" 
+          transparent 
+          opacity={0.08} 
+          blending={THREE.AdditiveBlending}
+        />
+      </lineSegments>
+    </>
   );
 };
 
@@ -175,9 +191,7 @@ export const ParticleBackground = () => {
         dpr={[1, 1.5]}
         gl={{ alpha: true, antialias: true }}
       >
-        {/* @ts-expect-error - Three.js types */}
         <Particles count={3000} />
-        {/* @ts-expect-error - Three.js types */}
         <ParticleConnections />
       </Canvas>
       

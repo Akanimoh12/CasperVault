@@ -10,7 +10,6 @@ import {
     FiLayers,
     FiLock,
     FiGlobe,
-    FiBarChart2,
     FiGithub,
     FiTwitter,
     FiMessageCircle
@@ -344,21 +343,21 @@ export const Landing = () => {
                                             </svg>
                                         </div>
                                         <div>
-                                            <h4 className="font-bold text-lg mb-1">{item.title}</h4>
-                                            <p className="text-gextrabold text-xl mb-2">{item.title}</h4>
-                                            <p className="text-gray-600 text-lg font-medium
-                  </div>
-                ))}
-              </div>
-            </motion.div>
+                                            <p className="text-extrabold text-xl mb-2">{item.title}</p>
+                                            <p className="text-gray-600 text-lg font-medium">{item.description}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </motion.div>
 
-            <motion.div
-              initial={{ opacity: 0, x: 30 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.6 }}
-              className="bg-white rounded-2xl p-8 border border-gray-200 shadow-xl"
-            >
+                        <motion.div
+                            initial={{ opacity: 0, x: 30 }}
+                            whileInView={{ opacity: 1, x: 0 }}
+                            viewport={{ once: true }}
+                            transition={{ duration: 0.6 }}
+                            className="bg-white rounded-2xl p-8 border border-gray-200 shadow-xl"
+                        >
                                             <div className="space-y-6">
                                                 <div className="flex items-center justify-between pb-4 border-b border-gray-200">
                                                     <span className="font-bold">Security Status</span>
@@ -399,8 +398,8 @@ export const Landing = () => {
                                             </div>
                                         </motion.div>
                                     </div>
-        </div>
-                        </section>
+                                </div>
+                            </section>
 
                         {/* CTA Section */}
                         <section className="py-20 px-6">
@@ -411,19 +410,19 @@ export const Landing = () => {
                                     viewport={{ once: true }}
                                     transition={{ duration: 0.6 }}
                                 >
-                                    <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              Ready to Maximize 5xl md:text-6xl font-extrabold mb-8">
+                                    <h2 className="text-5xl md:text-6xl font-extrabold mb-8">
                                         Ready to Start Earning?
                                     </h2>
                                     <p className="text-2xl text-gray-600 mb-10 font-medium">
-                                        Join the future of DeFi
-                                        <Link
-                                            to="/dashboard"
-                                            className="inline-flex items-center space-x-3 px-12 py-6 bg-gradient-to-r from-primary-500 to-accent-500 text-white rounded-xl hover:shadow-2xl hover:scale-105 transition-all duration-200 text-2xl font-extrabold group"
-                                        >
-                                            <span>Launch App</span>
-                                            <FiArrowRight className="w-7 h-7 group-hover:translate-x-1 transition-transform" />
-                                        </Link>
+                                        Join the future of DeFi on Casper Network
+                                    </p>
+                                    <Link
+                                        to="/dashboard"
+                                        className="inline-flex items-center space-x-3 px-12 py-6 bg-gradient-to-r from-primary-500 to-accent-500 text-white rounded-xl hover:shadow-2xl hover:scale-105 transition-all duration-200 text-2xl font-extrabold group"
+                                    >
+                                        <span>Launch App</span>
+                                        <FiArrowRight className="w-7 h-7 group-hover:translate-x-1 transition-transform" />
+                                    </Link>
                                 </motion.div>
                             </div>
                         </section>
@@ -473,7 +472,7 @@ export const Landing = () => {
                                 </div>
 
                                 <div className="pt-8 border-t border-gray-200 flex flex-col md:flex-row justify-between items-center">
-    }                                <p className="text-base text-gray-600 font-medium">
+                                    <p className="text-base text-gray-600 font-medium">
                                         © 2025 CasperVault. All rights reserved.
                                     </p>
 
@@ -492,5 +491,5 @@ export const Landing = () => {
                             </div>
                         </footer>
                     </div>
-                    );
-};
+                );
+            };
