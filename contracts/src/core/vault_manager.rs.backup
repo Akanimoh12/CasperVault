@@ -1,0 +1,514 @@
+use odra::prelude::*;
+use crate::types::*;
+use crate::utils::{AccessControl, ReentrancyGuard, Pausable};
+use crate::tokens::{CvCspr, LstCspr};
+
+/// Withdrawal request structure for time-locked withdrawals
+#[odra::odra_type]
+pub struct WithdrawalRequest {
+    pub user: Address,
+    pub shares: U512,
+    pub assets_value: U512,  // lstCSPR value at request time
+    pub unlock_time: u64,
+    pub is_completed: bool,
+}
+
+/// User deposit tracking for performance fee calculation
+#[odra::odra_type]
+pub struct UserDeposit {
+    pub total_deposited: U512,  // Total CSPR deposited
+    pub total_shares: U512,       // Total shares owned
+    pub cost_basis: U512,         // Average cost per share
+    pub last_deposit_time: u64,
+}
+
+/// VaultManager - Main vault contract (ERC-4626 compliant)
+/// 
+/// This contract manages user deposits, withdrawals, and vault shares following
+/// the ERC-4626 Tokenized Vault Standard for maximum composability.
+/// 
+/// **Architecture:**
+/// User CSPR → LiquidStaking (→lstCSPR) → VaultManager (→cvCSPR) → Strategies
+/// 
+/// **Share Price Appreciation:**
+/// - Initial: 1 cvCSPR = 1 lstCSPR (1:1 ratio)
+/// - As yields accrue: 1 cvCSPR = 1.1 lstCSPR (10% appreciation)
+/// - Formula: sharePrice = totalAssets / totalShares
+/// 
+/// **Key Responsibilities:**
+/// - Accept CSPR deposits and mint cvCSPR shares
+/// - Calculate fair share prices (ERC-4626 compliant)
+/// - Handle two withdrawal types:
+///   * Time-locked (7 days, no fee)
+///   * Instant (from pool, 0.5% fee)
+/// - Deploy assets to yield strategies
+/// - Collect and distribute fees
+/// - Emergency pause/unpause
+#[odra::module]
+pub struct VaultManager {
+    /// Access control module
+    access_control: SubModule<AccessControl>,
+    /// Reentrancy guard for security
+    reentrancy_guard: SubModule<ReentrancyGuard>,
+    /// Pausable for emergencies
+    pausable: SubModule<Pausable>,
+    
+    // ==================== CORE STATE ====================
+    
+    /// Total assets under management (in lstCSPR)
+    /// Includes: vault balance + strategy deployments + accrued yields
+    total_assets: Var<U512>,
+    
+    /// Total vault shares issued (cvCSPR)
+    total_shares: Var<U512>,
+    
+    /// User shares mapping (user -> shares balance)
+    user_shares: Mapping<Address, U512>,
+    
+    /// User deposit tracking (for performance fee calculation)
+    user_deposits: Mapping<Address, UserDeposit>,
+    
+    // ==================== CONTRACT ADDRESSES ====================
+    
+    /// cvCSPR token contract address
+    cv_cspr_token: Var<Address>,
+    
+    /// lstCSPR token contract address
+    lst_cspr_token: Var<Address>,
+    
+    /// LiquidStaking contract address
+    liquid_staking_contract: Var<Address>,
+    
+    /// StrategyRouter contract address
+    strategy_router_contract: Var<Address>,
+    
+    // ==================== WITHDRAWALS ====================
+    
+    /// Withdrawal requests mapping (request_id -> WithdrawalRequest)
+    withdrawal_requests: Mapping<U256, WithdrawalRequest>,
+    
+    /// Next withdrawal request ID
+    next_request_id: Var<U256>,
+    
+    /// Timelock for standard withdrawals (in seconds)
+    withdrawal_timelock: Var<u64>,  // Default: 7 days
+    
+    /// Instant withdrawal pool liquidity (lstCSPR)
+    instant_withdrawal_pool: Var<U512>,
+    
+    /// Target instant withdrawal pool percentage (basis points)
+    instant_pool_target_bps: Var<u16>,  // Default: 500 (5%)
+    
+    // ==================== FEES ====================
+    
+    /// Performance fee (basis points, 10000 = 100%)
+    performance_fee_bps: Var<u16>,  // Default: 1000 (10%)
+    
+    /// Management fee annual rate (basis points)
+    management_fee_bps: Var<u16>,  // Default: 200 (2%)
+    
+    /// Instant withdrawal fee (basis points)
+    instant_withdrawal_fee_bps: Var<u16>,  // Default: 50 (0.5%)
+    
+    /// Accumulated fees (in lstCSPR)
+    fees_collected: Var<U512>,
+    
+    /// Last management fee collection timestamp
+    last_fee_collection: Var<u64>,
+    
+    /// Protocol treasury address
+    treasury: Var<Address>,
+    
+    // ==================== LIMITS & SAFETY ====================
+    
+    /// Maximum deposit per transaction (rate limiting)
+    max_deposit: Var<U512>,  // Default: 10,000 CSPR
+    
+    /// Maximum deposit per user per day
+    max_deposit_per_day: Var<U512>,  // Default: 50,000 CSPR
+    
+    /// User daily deposit tracking (user -> (day, amount))
+    daily_deposits: Mapping<Address, (u64, U512)>,
+    
+    /// Minimum shares to mint (prevent dust)
+    min_shares: Var<U512>,  // Default: 1000 (0.000001 shares)
+}
+
+#[odra::module]
+impl VaultManager {
+    /// Initialize the VaultManager
+    pub fn init(
+        &mut self,
+        admin: Address,
+        cv_cspr_token: Address,
+        lst_cspr_token: Address,
+        liquid_staking_contract: Address,
+    ) {
+        // Initialize modules
+        self.access_control.init(admin);
+        self.reentrancy_guard.init();
+        self.pausable.init();
+        
+        // Set contract addresses
+        self.cv_cspr_token.set(cv_cspr_token);
+        self.lst_cspr_token.set(lst_cspr_token);
+        self.liquid_staking_contract.set(liquid_staking_contract);
+        
+        // Initialize state
+        self.total_assets.set(U512::zero());
+        self.total_shares.set(U512::zero());
+        self.next_request_id.set(U256::zero());
+        
+        // Set default fees
+        self.performance_fee_bps.set(1000);      // 10%
+        self.management_fee_bps.set(200);        // 2%
+        self.instant_withdrawal_fee_bps.set(50); // 0.5%
+        
+        // Set withdrawal timelock to 7 days
+        self.withdrawal_timelock.set(7 * 24 * 60 * 60);
+        
+        self.fees_collected.set(U512::zero());
+        self.instant_withdrawal_pool.set(U512::zero());
+    }
+
+    /// Deposit CSPR and receive cvCSPR vault shares
+    /// 
+    /// Process:
+    /// 1. Receive CSPR from user
+    /// 2. Stake CSPR to get lstCSPR
+    /// 3. Calculate shares to mint
+    /// 4. Deploy lstCSPR to strategies
+    /// 5. Mint cvCSPR shares to user
+    pub fn deposit(&mut self, amount: U512) -> U512 {
+        self.pausable.when_not_paused();
+        self.reentrancy_guard.enter();
+        
+        // Validate amount
+        if amount.is_zero() {
+            self.env().revert(VaultError::ZeroAmount);
+        }
+        
+        let caller = self.env().caller();
+        
+        // TODO: Transfer CSPR from user
+        // TODO: Call LiquidStaking.stake(amount) to get lstCSPR
+        
+        // For now, assume we got lstCSPR 1:1
+        let lst_cspr_amount = amount;
+        
+        // Calculate shares to mint
+        let shares = self.convert_to_shares(lst_cspr_amount);
+        
+        // Update total assets and shares
+        let current_assets = self.total_assets.get_or_default();
+        self.total_assets.set(current_assets + lst_cspr_amount);
+        
+        let current_shares = self.total_shares.get_or_default();
+        self.total_shares.set(current_shares + shares);
+        
+        // TODO: Mint cvCSPR shares to user
+        // TODO: Deploy lstCSPR to strategies via StrategyRouter
+        
+        // Emit event
+        self.env().emit_event(Deposit {
+            user: caller,
+            cspr_amount: amount,
+            lst_cspr_amount,
+            shares_minted: shares,
+            timestamp: self.env().get_block_time(),
+        });
+        
+        self.reentrancy_guard.exit();
+        shares
+    }
+
+    /// Withdraw CSPR by burning cvCSPR shares (standard 7-day withdrawal)
+    /// 
+    /// Process:
+    /// 1. Burn user's cvCSPR shares
+    /// 2. Calculate assets to return
+    /// 3. Withdraw lstCSPR from strategies
+    /// 4. Unstake lstCSPR to get CSPR
+    /// 5. Transfer CSPR to user
+    pub fn withdraw(&mut self, shares: U512) -> U512 {
+        self.reentrancy_guard.enter();
+        
+        // Validate shares
+        if shares.is_zero() {
+            self.env().revert(VaultError::ZeroAmount);
+        }
+        
+        let caller = self.env().caller();
+        
+        // TODO: Check user has sufficient cvCSPR shares
+        
+        // Calculate assets to return
+        let assets = self.convert_to_assets(shares);
+        
+        // Update total assets and shares
+        let current_assets = self.total_assets.get_or_default();
+        self.total_assets.set(current_assets - assets);
+        
+        let current_shares = self.total_shares.get_or_default();
+        self.total_shares.set(current_shares - shares);
+        
+        // TODO: Burn cvCSPR shares
+        // TODO: Withdraw lstCSPR from strategies
+        // TODO: Unstake lstCSPR to get CSPR
+        // TODO: Transfer CSPR to user
+        
+        // For now, assume we got CSPR 1:1
+        let cspr_amount = assets;
+        
+        // Emit event
+        self.env().emit_event(Withdraw {
+            user: caller,
+            shares_burned: shares,
+            lst_cspr_amount: assets,
+            cspr_amount,
+            timestamp: self.env().get_block_time(),
+        });
+        
+        self.reentrancy_guard.exit();
+        cspr_amount
+    }
+
+    /// Request a time-locked withdrawal (no fees, but must wait)
+    pub fn request_withdrawal(&mut self, shares: U512) -> U256 {
+        self.pausable.when_not_paused();
+        
+        if shares.is_zero() {
+            self.env().revert(VaultError::ZeroAmount);
+        }
+        
+        let caller = self.env().caller();
+        let current_time = self.env().get_block_time();
+        let timelock = self.withdrawal_timelock.get_or_default();
+        let unlock_time = current_time + timelock;
+        
+        // Generate request ID
+        let request_id = self.next_request_id.get_or_default();
+        self.next_request_id.set(request_id + U256::one());
+        
+        // Create withdrawal request
+        let request = WithdrawalRequest {
+            user: caller,
+            shares,
+            unlock_time,
+            is_completed: false,
+        };
+        
+        self.withdrawal_requests.set(&request_id, request);
+        
+        // Emit event
+        self.env().emit_event(WithdrawalRequestCreated {
+            request_id,
+            user: caller,
+            shares,
+            unlock_time,
+        });
+        
+        request_id
+    }
+
+    /// Complete a time-locked withdrawal request
+    pub fn complete_withdrawal(&mut self, request_id: U256) -> U512 {
+        self.reentrancy_guard.enter();
+        
+        // Get withdrawal request
+        let request = self.withdrawal_requests.get(&request_id)
+            .unwrap_or_else(|| self.env().revert(VaultError::WithdrawalRequestNotFound));
+        
+        // Check request is not already completed
+        if request.is_completed {
+            self.env().revert(VaultError::WithdrawalRequestNotFound);
+        }
+        
+        // Check caller is the owner
+        let caller = self.env().caller();
+        if caller != request.user {
+            self.env().revert(VaultError::Unauthorized);
+        }
+        
+        // Check timelock has expired
+        let current_time = self.env().get_block_time();
+        if current_time < request.unlock_time {
+            self.env().revert(VaultError::TimelockNotExpired);
+        }
+        
+        // Process withdrawal (no fee)
+        let cspr_amount = self.withdraw(request.shares);
+        
+        // Mark request as completed
+        let mut updated_request = request;
+        updated_request.is_completed = true;
+        self.withdrawal_requests.set(&request_id, updated_request);
+        
+        // Emit event
+        self.env().emit_event(WithdrawalRequestCompleted {
+            request_id,
+            user: caller,
+            cspr_amount,
+        });
+        
+        self.reentrancy_guard.exit();
+        cspr_amount
+    }
+
+    /// Instant withdrawal with 0.5% fee (uses liquidity pool)
+    pub fn instant_withdraw(&mut self, shares: U512) -> U512 {
+        self.pausable.when_not_paused();
+        self.reentrancy_guard.enter();
+        
+        if shares.is_zero() {
+            self.env().revert(VaultError::ZeroAmount);
+        }
+        
+        // Calculate assets
+        let assets = self.convert_to_assets(shares);
+        
+        // Calculate fee
+        let fee_bps = self.instant_withdrawal_fee_bps.get_or_default();
+        let fee = (assets * U512::from(fee_bps)) / U512::from(10000u64);
+        let amount_after_fee = assets - fee;
+        
+        // Check instant withdrawal pool has liquidity
+        let pool_liquidity = self.instant_withdrawal_pool.get_or_default();
+        if pool_liquidity < amount_after_fee {
+            self.env().revert(VaultError::InsufficientLiquidity);
+        }
+        
+        // Update pool
+        self.instant_withdrawal_pool.set(pool_liquidity - amount_after_fee);
+        
+        // Update fees collected
+        let fees = self.fees_collected.get_or_default();
+        self.fees_collected.set(fees + fee);
+        
+        // Process withdrawal
+        let caller = self.env().caller();
+        
+        // TODO: Burn cvCSPR shares
+        // TODO: Transfer CSPR to user
+        
+        // Emit event
+        self.env().emit_event(InstantWithdraw {
+            user: caller,
+            shares_burned: shares,
+            cspr_amount: amount_after_fee,
+            fee_amount: fee,
+            timestamp: self.env().get_block_time(),
+        });
+        
+        self.reentrancy_guard.exit();
+        amount_after_fee
+    }
+
+    /// Convert assets (lstCSPR) to shares (cvCSPR)
+    /// 
+    /// Formula: shares = assets * totalShares / totalAssets
+    /// For first deposit: shares = assets (1:1 ratio)
+    pub fn convert_to_shares(&self, assets: U512) -> U512 {
+        let total_shares = self.total_shares.get_or_default();
+        let total_assets = self.total_assets.get_or_default();
+        
+        if total_shares.is_zero() || total_assets.is_zero() {
+            // First deposit: 1:1 ratio
+            assets
+        } else {
+            // shares = assets * totalShares / totalAssets
+            (assets * total_shares) / total_assets
+        }
+    }
+
+    /// Convert shares (cvCSPR) to assets (lstCSPR)
+    /// 
+    /// Formula: assets = shares * totalAssets / totalShares
+    pub fn convert_to_assets(&self, shares: U512) -> U512 {
+        let total_shares = self.total_shares.get_or_default();
+        let total_assets = self.total_assets.get_or_default();
+        
+        if total_shares.is_zero() {
+            self.env().revert(VaultError::ZeroTotalShares);
+        }
+        
+        // assets = shares * totalAssets / totalShares
+        (shares * total_assets) / total_shares
+    }
+
+    /// Get total assets under management
+    pub fn total_assets(&self) -> U512 {
+        self.total_assets.get_or_default()
+    }
+
+    /// Get total shares issued
+    pub fn total_shares(&self) -> U512 {
+        self.total_shares.get_or_default()
+    }
+
+    /// Get current share price (in lstCSPR per cvCSPR)
+    pub fn share_price(&self) -> U256 {
+        let total_shares = self.total_shares.get_or_default();
+        let total_assets = self.total_assets.get_or_default();
+        
+        if total_shares.is_zero() {
+            U256::one()  // 1:1 initially
+        } else {
+            // price = totalAssets / totalShares
+            U256::from(total_assets) * U256::from(1_000_000_000u64) / U256::from(total_shares)
+        }
+    }
+
+    /// Pause the vault (emergency only)
+    pub fn pause(&mut self) {
+        self.access_control.only_guardian();
+        self.pausable.pause();
+    }
+
+    /// Unpause the vault
+    pub fn unpause(&mut self) {
+        self.access_control.only_admin();
+        self.pausable.unpause();
+    }
+
+    /// Update fee settings (admin only)
+    pub fn set_fees(&mut self, performance_fee: u16, management_fee: u16, instant_withdrawal_fee: u16) {
+        self.access_control.only_admin();
+        
+        // Validate fees (max 50% for performance, 10% for management, 5% for instant withdrawal)
+        if performance_fee > 5000 || management_fee > 1000 || instant_withdrawal_fee > 500 {
+            self.env().revert(VaultError::Unauthorized);
+        }
+        
+        self.performance_fee_bps.set(performance_fee);
+        self.management_fee_bps.set(management_fee);
+        self.instant_withdrawal_fee_bps.set(instant_withdrawal_fee);
+        
+        self.env().emit_event(FeesUpdated {
+            performance_fee_bps: performance_fee,
+            management_fee_bps: management_fee,
+            instant_withdrawal_fee_bps: instant_withdrawal_fee,
+            updated_by: self.env().caller(),
+        });
+    }
+
+    /// Collect accumulated fees (admin only)
+    pub fn collect_fees(&mut self, recipient: Address) {
+        self.access_control.only_admin();
+        
+        let fees = self.fees_collected.get_or_default();
+        if fees.is_zero() {
+            return;
+        }
+        
+        self.fees_collected.set(U512::zero());
+        
+        // TODO: Transfer fees to recipient
+        
+        self.env().emit_event(FeesCollected {
+            amount: fees,
+            recipient,
+            timestamp: self.env().get_block_time(),
+        });
+    }
+}

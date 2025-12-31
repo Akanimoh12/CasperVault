@@ -1,0 +1,44 @@
+[package]
+name = "caspervault-contracts"
+version = "0.1.0"
+edition = "2021"
+authors = ["CasperVault Team"]
+description = "Cross-chain DeFi aggregator smart contracts for Casper Network"
+
+[dependencies]
+odra = "0.8"
+
+[dev-dependencies]
+odra = "0.8"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "caspervault_vault_manager"
+path = "src/bin/vault_manager.rs"
+test = false
+
+[[bin]]
+name = "caspervault_liquid_staking"
+path = "src/bin/liquid_staking.rs"
+test = false
+
+[[bin]]
+name = "caspervault_lst_cspr"
+path = "src/bin/lst_cspr.rs"
+test = false
+
+[[bin]]
+name = "caspervault_cv_cspr"
+path = "src/bin/cv_cspr.rs"
+test = false
+
+[profile.release]
+opt-level = 'z'
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
