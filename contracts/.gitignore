@@ -18,3 +18,5 @@ Thumbs.db
 # Odra
 .odra/
 *.wasm
+.deployment-info
+keys/
