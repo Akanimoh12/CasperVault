@@ -4,7 +4,6 @@ use odra::{Address, Mapping, SubModule, Var};
 use odra::casper_types::{U256, U512};
 use crate::types::*;
 use crate::utils::{AccessControl, ValidatorRegistry};
-use crate::tokens::LstCspr;
 
 /// Delegation tracking for unbonding
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +13,19 @@ pub struct UnbondingRequest {
     pub amount: U512,
     pub unlock_time: u64,
     pub is_completed: bool,
+}
+
+/// Validator information
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatorInfo {
+    pub uptime_percentage: u8,
+    pub commission_rate: u8,
+    pub current_stake: U512,
+    pub max_stake_cap: U512,
+    pub is_verified: bool,
+    pub risk_score: u8,
+    pub staked: U512,
+    pub performance: U512,
 }
 
 /// LiquidStaking contract
@@ -75,6 +87,18 @@ pub struct LiquidStaking {
     
     /// Total rewards earned (for analytics)
     total_rewards_earned: Var<U512>,
+    
+    /// Validator information mapping
+    validators: Mapping<Address, ValidatorInfo>,
+    
+    /// Active validators list
+    active_validators: Var<Vec<Address>>,
+    
+    /// Minimum uptime requirement
+    min_uptime: Var<u8>,
+    
+    /// Maximum commission rate
+    max_commission: Var<u8>,
 }
 
 #[odra::module]
@@ -154,7 +178,6 @@ impl LiquidStaking {
             user: caller,
             cspr_amount: total_delegated,
             lst_cspr_minted: lst_cspr_amount,
-            validators: validator_addresses,
             timestamp: self.env().get_block_time(),
         });
         
@@ -203,7 +226,7 @@ impl LiquidStaking {
         
         let request = UnbondingRequest {
             user: caller,
-            validator: Address::zero(), // Multiple validators
+            validator: self.env().caller(), // Use caller as placeholder since Address has no zero()
             amount: cspr_amount,
             unlock_time,
             is_completed: false,
@@ -366,8 +389,9 @@ impl LiquidStaking {
                 continue;
             }
             
-            let proportion = (U256::from(delegation) * U256::from(total_amount)) / U256::from(total_delegated);
-            let undelegate_amount: U512 = proportion.try_into().unwrap_or(U512::zero());
+            // Calculate proportion using U512 for precision
+            let proportion_512 = (delegation * U512::from(1_000_000u64) * total_amount) / (total_delegated * U512::from(1_000_000u64));
+            let undelegate_amount = proportion_512;
             
             if undelegate_amount > remaining {
                 let actual_amount = remaining;
@@ -422,19 +446,19 @@ impl LiquidStaking {
     /// Convert CSPR to lstCSPR based on current exchange rate
     fn cspr_to_lst_cspr(&self, cspr_amount: U512) -> U512 {
         let rate = self.exchange_rate.get_or_default();
+        let rate_512 = U512::from(rate.as_u64());
         // lstCSPR = CSPR * 1e9 / rate
-        (U256::from(cspr_amount) * U256::from(1_000_000_000u64) / rate)
-            .try_into()
+        (cspr_amount * U512::from(1_000_000_000u64) / rate_512)
+            .checked_div(U512::from(1_000_000_000u64))
             .unwrap_or(cspr_amount)
     }
 
     /// Convert lstCSPR to CSPR based on current exchange rate
     fn lst_cspr_to_cspr(&self, lst_cspr_amount: U512) -> U512 {
         let rate = self.exchange_rate.get_or_default();
+        let rate_512 = U512::from(rate.as_u64());
         // CSPR = lstCSPR * rate / 1e9
-        (U256::from(lst_cspr_amount) * rate / U256::from(1_000_000_000u64))
-            .try_into()
-            .unwrap_or(lst_cspr_amount)
+        (lst_cspr_amount * rate_512 / U512::from(1_000_000_000u64))
     }
 
     /// Update exchange rate based on total staked and total lstCSPR
@@ -447,7 +471,9 @@ impl LiquidStaking {
         }
         
         // rate = total_staked * 1e9 / total_lst_cspr
-        let new_rate = U256::from(total_staked) * U256::from(1_000_000_000u64) / U256::from(total_lst_cspr);
+        // Calculate new rate using U512
+        let new_rate_512 = total_staked * U512::from(1_000_000_000u64) / total_lst_cspr;
+        let new_rate = U256::from(new_rate_512.as_u64());
         self.exchange_rate.set(new_rate);
     }
 
@@ -475,13 +501,14 @@ impl LiquidStaking {
         
         // Create validator info
         let validator_info = ValidatorInfo {
-            validator,
             uptime_percentage,
             commission_rate,
             current_stake: U512::zero(),
             max_stake_cap,
             is_verified: true,
             risk_score: 0,
+            staked: U512::zero(),
+            performance: U512::zero(),
         };
         
         self.validators.set(&validator, validator_info);
@@ -567,8 +594,8 @@ impl LiquidStaking {
             return 0;
         }
         
-        // Simple calculation: (rewards / staked) * 10000
-        let apy_bps = (U256::from(total_rewards) * U256::from(10000u64) / U256::from(total_staked))
+        // Simple calculation: (rewards / staked) * 10000 using U512
+        let apy_bps = (total_rewards * U512::from(10000u64) / total_staked)
             .as_u64();
         
         apy_bps
@@ -636,41 +663,4 @@ impl LiquidStaking {
         
         self.undelegate_from_validator(validator, amount);
     }
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct Stake {
-    pub user: Address,
-    pub amount: U512,
-    pub validator: Address,
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct Unstake {
-    pub user: Address,
-    pub amount: U512,
-    pub validator: Address,
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct CompoundRewards {
-    pub validator: Address,
-    pub rewards: U512,
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct ValidatorInfo {
-    pub validator: Address,
-    pub staked: U512,
-    pub performance: U512,
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct ValidatorAdded {
-    pub validator: Address,
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct ValidatorRemoved {
-    pub validator: Address,
 }

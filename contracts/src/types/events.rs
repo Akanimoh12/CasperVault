@@ -17,6 +17,7 @@ pub struct Deposit {
 pub struct Withdraw {
     pub user: Address,
     pub shares_burned: U512,
+    pub shares: U512,
     pub assets: U512,
     pub timestamp: u64,
 }
@@ -46,7 +47,23 @@ pub struct WithdrawalRequested {
 pub struct WithdrawalCompleted {
     pub request_id: U256,
     pub user: Address,
+    pub assets: U512,
+    pub shares: U512,
     pub cspr_amount: U512,
+    pub timestamp: u64,
+}
+
+/// Event emitted when an instant withdrawal is processed
+#[derive(Event, Debug, PartialEq, Eq)]
+pub struct InstantWithdrawal {
+    pub user: Address,
+    pub shares_burned: U512,
+    pub assets: U512,
+    pub shares: U512,
+    pub fee: U512,
+    pub cspr_amount: U512,
+    pub fee_amount: U512,
+    pub timestamp: u64,
 }
 
 /// Event emitted when CSPR is staked
@@ -218,7 +235,10 @@ pub struct BridgeCompleted {
 #[derive(Event, Debug, PartialEq, Eq)]
 pub struct ManagementFeesCollected {
     pub amount: U512,
+    pub shares: U512,
     pub fee_recipient: Address,
+    pub treasury: Address,
+    pub timestamp: u64,
 }
 
 /// Event emitted when funds are rescued from contract

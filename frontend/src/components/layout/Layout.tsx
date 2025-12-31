@@ -3,6 +3,7 @@ import { Toaster } from 'react-hot-toast';
 import { Navbar } from './Navbar';
 import { Footer } from './Footer';
 import { ParticleBackground } from '@/components/three';
+import { RealtimeNotifications } from '@/components/common';
 import { useUIStore } from '@/store/uiStore';
 
 export const Layout = () => {
@@ -49,6 +50,9 @@ export const Layout = () => {
           },
         }}
       />
+
+      {/* Real-time WebSocket Notifications */}
+      <RealtimeNotifications />
     </div>
   );
 };

@@ -1,6 +1,6 @@
 use odra::prelude::*;
 use odra::Event;
-use odra::{Address, Mapping, SubModule, Var};
+use odra::{Address, Mapping, Var};
 use odra::casper_types::{U256, U512};
 use crate::types::*;
 
@@ -127,8 +127,6 @@ impl ValidatorRegistry {
         
         self.env().emit_event(ValidatorAdded {
             validator,
-            uptime_percentage,
-            commission_rate,
         });
         
         Ok(())
@@ -152,7 +150,6 @@ impl ValidatorRegistry {
         
         self.env().emit_event(ValidatorRemoved {
             validator,
-            reason,
         });
     }
 
@@ -253,9 +250,8 @@ impl ValidatorRegistry {
         let mut remaining = amount_to_stake;
         
         let new_total = total_stake + amount_to_stake;
-        let max_per_validator = (U256::from(new_total) * U256::from(max_per_validator_pct) / U256::from(100u64))
-            .try_into()
-            .unwrap_or(U512::MAX);
+        let max_per_validator = (new_total * U512::from(max_per_validator_pct) / U512::from(100u64))
+            .min(U512::MAX);
         
         // First pass: Distribute evenly with caps
         let num_validators = eligible.len();
@@ -416,7 +412,7 @@ impl ValidatorRegistry {
             return 100_000_000; // High score if no stake yet
         }
         
-        let validator_pct = (U256::from(metrics.current_stake) * U256::from(1_000_000u64) / U256::from(total_stake))
+        let validator_pct = (metrics.current_stake * U512::from(1_000_000u64) / total_stake)
             .as_u64();
         
         // Lower percentage = higher score

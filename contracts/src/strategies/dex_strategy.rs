@@ -5,15 +5,16 @@
 
 use odra::prelude::*;
 use odra::Event;
-use odra::{Address, Mapping, SubModule, Var};
+use odra::{Address, SubModule, Var};
 use odra::casper_types::{U256, U512};
-use crate::strategies::strategy_interface::{IStrategy, RiskLevel, StrategyError};
+use crate::strategies::strategy_interface::RiskLevel;
+use crate::errors::StrategyError;
 use crate::utils::access_control::AccessControl;
 use crate::utils::pausable::Pausable;
 use crate::utils::reentrancy_guard::ReentrancyGuard;
 
 /// LP position information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct LPPosition {
     /// LP tokens held
     lp_tokens: U512,
@@ -35,7 +36,7 @@ struct LPPosition {
 }
 
 /// Impermanent loss tracking
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct ImpermanentLoss {
     /// Initial value in CSPR
     initial_value: U512,

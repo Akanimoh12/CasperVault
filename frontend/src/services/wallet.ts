@@ -1,9 +1,25 @@
 import { CasperClient, CLPublicKey, DeployUtil } from 'casper-js-sdk';
 import { CASPER_RPC_URL } from '@/utils/constants';
 
+// Helper to get the wallet provider
+function getWalletProvider() {
+  if (window.casperlabsHelper) {
+    return window.casperlabsHelper;
+  }
+  if (window.CasperWalletProvider) {
+    // CasperWalletProvider is a function that returns the provider object
+    return window.CasperWalletProvider();
+  }
+  if (window.csprclick) {
+    return window.csprclick;
+  }
+  return null;
+}
+
 class WalletService {
   private casperClient: CasperClient;
   private activePublicKey: string | null = null;
+  private walletProvider: any = null;
 
   constructor() {
     this.casperClient = new CasperClient(CASPER_RPC_URL);
@@ -13,24 +29,29 @@ class WalletService {
     try {
       console.log('🔗 Attempting to connect to Casper Wallet...');
       
-      // Check if Casper Wallet extension is installed
-      if (!window.casperlabsHelper) {
-        console.error('❌ window.casperlabsHelper not found');
+      // Get the wallet provider
+      this.walletProvider = getWalletProvider();
+      
+      if (!this.walletProvider) {
+        console.error('❌ No wallet provider found');
         throw new Error('Casper Wallet extension not found. Please install it from casper.network');
       }
 
       console.log('📡 Requesting wallet connection...');
       // Request connection
-      await window.casperlabsHelper.requestConnection();
+      await this.walletProvider.requestConnection();
       
-      // Connection is implicit if no error is thrown
+      console.log('✅ Connection accepted, getting active key...');
 
       // Get active public key
-      const publicKey = await window.casperlabsHelper.getActivePublicKey();
+      const publicKey = await this.walletProvider.getActivePublicKey();
       this.activePublicKey = publicKey;
+      
+      console.log('🔑 Public Key:', publicKey);
 
       // Fetch balance
       const balance = await this.getBalance(publicKey);
+      console.log('💰 Balance:', balance, 'CSPR');
 
       // Store connection state
       localStorage.setItem('wallet_connected', 'true');
@@ -48,16 +69,18 @@ class WalletService {
 
   async disconnect(): Promise<void> {
     try {
-      if (window.casperlabsHelper) {
-        await window.casperlabsHelper.disconnectFromSite();
+      if (this.walletProvider && this.walletProvider.disconnectFromSite) {
+        await this.walletProvider.disconnectFromSite();
       }
       this.activePublicKey = null;
+      this.walletProvider = null;
       localStorage.removeItem('wallet_connected');
       localStorage.removeItem('wallet_address');
     } catch (error) {
       console.error('Disconnect error:', error);
       // Still clear local state even if disconnect fails
       this.activePublicKey = null;
+      this.walletProvider = null;
       localStorage.removeItem('wallet_connected');
       localStorage.removeItem('wallet_address');
     }
@@ -81,8 +104,8 @@ class WalletService {
   }
 
   async signTransaction(deploy: DeployUtil.Deploy): Promise<DeployUtil.Deploy> {
-    if (!window.casperlabsHelper) {
-      throw new Error('Casper Wallet not connected');
+    if (!this.walletProvider) {
+      throw new Error('Wallet not connected');
     }
 
     if (!this.activePublicKey) {
@@ -91,7 +114,7 @@ class WalletService {
 
     try {
       const deployJSON = DeployUtil.deployToJson(deploy);
-      const signedDeployJSON = await window.casperlabsHelper.sign(
+      const signedDeployJSON = await this.walletProvider.sign(
         deployJSON,
         this.activePublicKey
       );
@@ -127,6 +150,18 @@ class WalletService {
           CasperWalletProvider: !!window.CasperWalletProvider,
           csprclick: !!window.csprclick
         });
+        
+        // Log the actual objects for debugging
+        if (window.casperlabsHelper) {
+          console.log('casperlabsHelper methods:', Object.keys(window.casperlabsHelper));
+        }
+        if (window.CasperWalletProvider) {
+          console.log('CasperWalletProvider:', window.CasperWalletProvider);
+        }
+        if (window.csprclick) {
+          console.log('csprclick:', window.csprclick);
+        }
+        
         return true;
       }
       
@@ -160,17 +195,21 @@ class WalletService {
     const wasConnected = localStorage.getItem('wallet_connected') === 'true';
     const savedAddress = localStorage.getItem('wallet_address');
 
-    if (wasConnected && savedAddress && window.casperlabsHelper) {
-      try {
-        const isConnected = await window.casperlabsHelper.isConnected();
-        if (isConnected) {
-          this.activePublicKey = savedAddress;
-          const balance = await this.getBalance(savedAddress);
-          return { address: savedAddress, balance };
+    if (wasConnected && savedAddress) {
+      this.walletProvider = getWalletProvider();
+      
+      if (this.walletProvider) {
+        try {
+          const isConnected = await this.walletProvider.isConnected();
+          if (isConnected) {
+            this.activePublicKey = savedAddress;
+            const balance = await this.getBalance(savedAddress);
+            return { address: savedAddress, balance };
+          }
+        } catch (error) {
+          console.error('Reconnection failed:', error);
+          this.disconnect();
         }
-      } catch (error) {
-        console.error('Reconnection failed:', error);
-        this.disconnect();
       }
     }
 

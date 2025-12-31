@@ -5,3 +5,7 @@ export { Modal } from './Modal';
 export { Badge } from './Badge';
 export { Loader, Spinner } from './Loader';
 export { BackgroundToggle } from './BackgroundToggle';
+export { RealtimeNotifications } from './RealtimeNotifications';
+export { LiveStats } from './LiveStats';
+export { ConnectionStatus } from './ConnectionStatus';
+

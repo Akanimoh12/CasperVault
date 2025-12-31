@@ -2,6 +2,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { MdDashboard, MdShowChart, MdAnalytics, MdAccountBalanceWallet } from 'react-icons/md';
 import { WalletButton } from '@/components/wallet';
+import { ConnectionStatus } from '@/components/common';
 
 const navLinks = [
   { path: '/', label: 'Dashboard', icon: MdDashboard },
@@ -55,8 +56,11 @@ export const Navbar = () => {
             })}
           </div>
 
-          {/* Wallet Button */}
-          <WalletButton />
+          {/* Wallet Button & Status */}
+          <div className="flex items-center gap-4">
+            <ConnectionStatus />
+            <WalletButton />
+          </div>
         </div>
       </div>
     </nav>
