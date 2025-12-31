@@ -1,0 +1,136 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 0 * * *'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo index
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo build
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Check formatting
+      working-directory: ./contracts
+      run: cargo fmt -- --check
+    
+    - name: Run clippy
+      working-directory: ./contracts
+      run: cargo clippy -- -D warnings
+    
+    - name: Build
+      working-directory: ./contracts
+      run: cargo build --verbose
+    
+    - name: Run unit tests
+      working-directory: ./contracts
+      run: cargo test --lib --verbose
+    
+    - name: Run integration tests
+      working-directory: ./contracts
+      run: cargo test --test integration --verbose
+    
+    - name: Run E2E tests
+      working-directory: ./contracts
+      run: cargo test --test e2e --verbose
+    
+    - name: Run security tests
+      working-directory: ./contracts
+      run: cargo test --test security --verbose
+    
+    - name: Run property-based tests
+      working-directory: ./contracts
+      run: cargo test --test property_tests --verbose
+    
+    - name: Generate test coverage
+      working-directory: ./contracts
+      run: |
+        cargo install cargo-tarpaulin
+        cargo tarpaulin --out Xml --output-dir coverage
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./contracts/coverage/cobertura.xml
+        fail_ci_if_error: true
+    
+    - name: Run gas benchmarks
+      working-directory: ./contracts
+      run: cargo test --test property_tests -- benchmark --nocapture
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+    
+    - name: Run cargo-audit
+      run: |
+        cargo install cargo-audit
+        cd contracts && cargo audit
+    
+    - name: Run cargo-deny
+      run: |
+        cargo install cargo-deny
+        cd contracts && cargo deny check
+
+  documentation:
+    name: Check Documentation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+    
+    - name: Check documentation
+      working-directory: ./contracts
+      run: cargo doc --no-deps --all-features

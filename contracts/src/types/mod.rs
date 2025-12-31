@@ -1,5 +1,5 @@
 pub mod errors;
-// pub mod events; // Events are defined inline in modules that emit them
+pub mod events;
 
 pub use errors::*;
-// pub use events::*;
+pub use events::*;

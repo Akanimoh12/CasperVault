@@ -229,7 +229,7 @@ impl StrategyMetadata {
     /// 
     /// # Returns
     /// `true` if utilization >= threshold
-    pub fn is_near_capacity(&self, threshold_bps: u16) -> bool {
+    pub fn is_near_capacity(&self, threshold_bps: u32) -> bool {
         self.utilization_bps() >= threshold_bps
     }
 }
@@ -241,13 +241,13 @@ pub struct AllocationConfig {
     pub name: String,
     
     /// Target allocation percentage (basis points, 0-10000)
-    pub target_bps: u16,
+    pub target_bps: u32,
     
     /// Minimum allocation (basis points)
-    pub min_bps: u16,
+    pub min_bps: u32,
     
     /// Maximum allocation (basis points)
-    pub max_bps: u16,
+    pub max_bps: u32,
     
     /// Enable/disable this strategy
     pub enabled: bool,
@@ -276,7 +276,7 @@ impl AllocationConfig {
     }
     
     /// Check if a proposed allocation is within bounds
-    pub fn is_within_bounds(&self, allocation_bps: u16) -> bool {
+    pub fn is_within_bounds(&self, allocation_bps: u32) -> bool {
         allocation_bps >= self.min_bps && allocation_bps <= self.max_bps
     }
 }

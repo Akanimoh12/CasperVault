@@ -63,10 +63,10 @@ pub struct YieldAggregator {
     total_yields_harvested: Var<U512>,
     
     /// Performance fee percentage (10% = 1000 basis points)
-    performance_fee_bps: Var<u16>,
+    performance_fee_bps: Var<u32>,
     
     /// Management fee percentage (2% annual = 200 basis points)
-    management_fee_bps: Var<u16>,
+    management_fee_bps: Var<u32>,
     
     /// Accumulated fees pending withdrawal
     accumulated_fees: Var<U512>,
@@ -412,7 +412,7 @@ impl YieldAggregator {
     }
     
     /// Admin: Set performance fee
-    pub fn set_performance_fee(&mut self, fee_bps: u16) {
+    pub fn set_performance_fee(&mut self, fee_bps: u32) {
         if !self.access_control.has_role(0, self.env().caller()) {
             self.env().revert(VaultError::Unauthorized);
         }
@@ -424,7 +424,7 @@ impl YieldAggregator {
     }
     
     /// Admin: Set management fee
-    pub fn set_management_fee(&mut self, fee_bps: u16) {
+    pub fn set_management_fee(&mut self, fee_bps: u32) {
         if !self.access_control.has_role(0, self.env().caller()) {
             self.env().revert(VaultError::Unauthorized);
         }

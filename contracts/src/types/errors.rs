@@ -45,6 +45,8 @@ pub enum VaultError {
     NoFeesToDistribute = 21,
     /// Invalid fee percentage
     InvalidFee = 22,
+    /// Slippage exceeded maximum allowed
+    SlippageExceeded = 23,
 }
 
 /// Errors specific to liquid staking operations
@@ -140,4 +142,41 @@ pub enum BridgeError {
     BridgePaused = 503,
     /// Bridge rate limit exceeded
     BridgeRateLimitExceeded = 504,
+}
+
+// Implement From trait for all custom errors to convert to OdraError
+impl From<VaultError> for odra::OdraError {
+    fn from(error: VaultError) -> Self {
+        odra::OdraError::ExecutionError(odra::ExecutionError::User(error as u16))
+    }
+}
+
+impl From<StakingError> for odra::OdraError {
+    fn from(error: StakingError) -> Self {
+        odra::OdraError::ExecutionError(odra::ExecutionError::User(error as u16))
+    }
+}
+
+impl From<StrategyError> for odra::OdraError {
+    fn from(error: StrategyError) -> Self {
+        odra::OdraError::ExecutionError(odra::ExecutionError::User(error as u16))
+    }
+}
+
+impl From<AccessError> for odra::OdraError {
+    fn from(error: AccessError) -> Self {
+        odra::OdraError::ExecutionError(odra::ExecutionError::User(error as u16))
+    }
+}
+
+impl From<TokenError> for odra::OdraError {
+    fn from(error: TokenError) -> Self {
+        odra::OdraError::ExecutionError(odra::ExecutionError::User(error as u16))
+    }
+}
+
+impl From<BridgeError> for odra::OdraError {
+    fn from(error: BridgeError) -> Self {
+        odra::OdraError::ExecutionError(odra::ExecutionError::User(error as u16))
+    }
 }

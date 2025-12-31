@@ -1,0 +1,67 @@
+{
+  "network": "NETWORK_NAME",
+  "deployed_at": "DEPLOYMENT_TIMESTAMP",
+  "commit_hash": "GIT_COMMIT_HASH",
+  "deployer": "DEPLOYER_INFO",
+  "contracts": {
+    "lstCSPR": "hash-lstCSPR-token-contract",
+    "cvCSPR": "hash-cvCSPR-vault-shares-token",
+    "VaultManager": "hash-vault-manager-main-contract",
+    "LiquidStaking": "hash-liquid-staking-contract",
+    "StrategyRouter": "hash-strategy-router-contract",
+    "YieldAggregator": "hash-yield-aggregator-contract",
+    "DEXStrategy": "hash-dex-strategy-contract",
+    "LendingStrategy": "hash-lending-strategy-contract",
+    "CrossChainStrategy": "hash-crosschain-strategy-contract"
+  },
+  "metadata": {
+    "vault_manager": {
+      "version": "1.0.0",
+      "description": "Main vault contract managing deposits and withdrawals",
+      "entry_points": ["deposit", "withdraw", "request_withdrawal", "instant_withdraw"]
+    },
+    "liquid_staking": {
+      "version": "1.0.0",
+      "description": "Liquid staking contract managing CSPR staking and lstCSPR minting",
+      "entry_points": ["stake", "unstake", "compound_rewards", "add_validator"]
+    },
+    "strategy_router": {
+      "version": "1.0.0",
+      "description": "Routes funds to different yield strategies",
+      "entry_points": ["allocate", "withdraw", "rebalance", "add_strategy"]
+    },
+    "yield_aggregator": {
+      "version": "1.0.0",
+      "description": "Aggregates yields from all sources and compounds",
+      "entry_points": ["aggregate_yields", "compound", "harvest_all"]
+    }
+  },
+  "configuration": {
+    "fees": {
+      "performance_fee_bps": 1000,
+      "management_fee_bps": 200,
+      "instant_withdrawal_fee_bps": 50
+    },
+    "limits": {
+      "max_deposit_per_tx": "10000000000000",
+      "max_deposit_per_day_per_user": "50000000000000",
+      "max_global_deposits_per_hour": "1000000000000000"
+    },
+    "strategy_allocations": {
+      "dex": 40,
+      "lending": 30,
+      "crosschain": 30
+    },
+    "timelock": {
+      "withdrawal_timelock_seconds": 604800,
+      "admin_timelock_seconds": 86400,
+      "upgrade_timelock_seconds": 172800
+    }
+  },
+  "verification": {
+    "deployment_verified": true,
+    "tests_passed": true,
+    "security_audit": "audit_report_link",
+    "code_hash": "contracts_code_hash"
+  }
+}

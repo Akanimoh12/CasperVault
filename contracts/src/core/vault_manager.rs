@@ -1,7 +1,8 @@
 use odra::prelude::*;
-use odra::{Address, Event, Mapping, SubModule, Var};
+use odra::{Address, Mapping, SubModule, Var};
 use odra::casper_types::{U256, U512};
-use crate::types::*;
+use crate::types::events::{Deposit, Withdraw, WithdrawalRequested, WithdrawalCompleted, InstantWithdraw};
+use crate::types::errors::VaultError;
 use crate::utils::{AccessControl, ReentrancyGuard, Pausable};
 use crate::tokens::{CvCspr, LstCspr};
 
@@ -10,17 +11,17 @@ use crate::tokens::{CvCspr, LstCspr};
 pub struct WithdrawalRequest {
     pub user: Address,
     pub shares: U512,
-    pub assets_value: U512,  // lstCSPR value at request time
-    pub unlock_time: u64,
-    pub is_completed: bool,
+    pub assets_value: U512,
+    pub request_time: u64,
+    pub completed: bool,
 }
 
 /// User deposit tracking for performance fee calculation
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserDeposit {
-    pub total_deposited: U512,  // Total CSPR deposited
-    pub total_shares: U512,       // Total shares owned
-    pub cost_basis: U512,         // Average cost per share
+    pub total_deposited: U512,
+    pub total_shares: U512,
+    pub cost_basis: U512,
     pub last_deposit_time: u64,
 }
 
@@ -96,17 +97,17 @@ pub struct VaultManager {
     instant_withdrawal_pool: Var<U512>,
     
     /// Target instant withdrawal pool percentage (basis points)
-    instant_pool_target_bps: Var<u16>,  // Default: 500 (5%)
+    instant_pool_target_bps: Var<u32>,  // Default: 500 (5%)
     
     
     /// Performance fee (basis points, 10000 = 100%)
-    performance_fee_bps: Var<u16>,  // Default: 1000 (10%)
+    performance_fee_bps: Var<u32>,  // Default: 1000 (10%)
     
     /// Management fee annual rate (basis points)
-    management_fee_bps: Var<u16>,  // Default: 200 (2%)
+    management_fee_bps: Var<u32>,  // Default: 200 (2%)
     
     /// Instant withdrawal fee (basis points)
-    instant_withdrawal_fee_bps: Var<u16>,  // Default: 50 (0.5%)
+    instant_withdrawal_fee_bps: Var<u32>,  // Default: 50 (0.5%)
     
     /// Accumulated fees (in lstCSPR)
     fees_collected: Var<U512>,
@@ -836,7 +837,7 @@ impl VaultManager {
     }
 
     /// Update instant pool target (admin only)
-    pub fn set_instant_pool_target(&mut self, target_bps: u16) {
+    pub fn set_instant_pool_target(&mut self, target_bps: u32) {
         self.access_control.only_admin();
         
         // Validate: max 50% (5000 bps)
@@ -907,53 +908,4 @@ impl VaultManager {
         let one_share = U512::from(1_000_000_000u64); // 1.0 with 9 decimals
         self.convert_to_assets(one_share)
     }
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct Deposit {
-    pub user: Address,
-    pub amount: U512,
-    pub shares: U512,
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct Withdraw {
-    pub user: Address,
-    pub amount: U512,
-    pub shares: U512,
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct WithdrawalRequested {
-    pub user: Address,
-    pub request_id: u64,
-    pub shares: U512,
-    pub unlock_time: u64,
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct WithdrawalCompleted {
-    pub user: Address,
-    pub request_id: u64,
-    pub amount: U512,
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct InstantWithdrawal {
-    pub user: Address,
-    pub amount: U512,
-    pub fee: U512,
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct ManagementFeesCollected {
-    pub amount: U512,
-    pub fee_recipient: Address,
-}
-
-#[derive(Event, Debug, PartialEq, Eq)]
-pub struct FundsRescued {
-    pub token: Address,
-    pub amount: U512,
-    pub recipient: Address,
 }

@@ -1,7 +1,6 @@
 use odra::prelude::*;
-use odra::Event;
-use odra::{Address, Mapping, SubModule, Var};
 use odra::casper_types::{U256, U512};
+use odra::{Address, Event};
 
 /// Event emitted when a deposit is made
 #[derive(Event, Debug, PartialEq, Eq)]
@@ -18,8 +17,7 @@ pub struct Deposit {
 pub struct Withdraw {
     pub user: Address,
     pub shares_burned: U512,
-    pub lst_cspr_amount: U512,
-    pub cspr_amount: U512,
+    pub assets: U512,
     pub timestamp: u64,
 }
 
@@ -35,16 +33,17 @@ pub struct InstantWithdraw {
 
 /// Event emitted when a withdrawal request is created
 #[derive(Event, Debug, PartialEq, Eq)]
-pub struct WithdrawalRequestCreated {
+pub struct WithdrawalRequested {
     pub request_id: U256,
     pub user: Address,
     pub shares: U512,
+    pub assets_value: U512,
     pub unlock_time: u64,
 }
 
 /// Event emitted when a withdrawal request is completed
 #[derive(Event, Debug, PartialEq, Eq)]
-pub struct WithdrawalRequestCompleted {
+pub struct WithdrawalCompleted {
     pub request_id: U256,
     pub user: Address,
     pub cspr_amount: U512,
@@ -56,7 +55,6 @@ pub struct Stake {
     pub user: Address,
     pub cspr_amount: U512,
     pub lst_cspr_minted: U512,
-    pub validators: Vec<Address>,
     pub timestamp: u64,
 }
 
@@ -105,8 +103,6 @@ pub struct AllocationUpdate {
 /// Event emitted when strategies are rebalanced
 #[derive(Event, Debug, PartialEq, Eq)]
 pub struct Rebalance {
-    pub old_allocations: Vec<(String, U512)>,
-    pub new_allocations: Vec<(String, U512)>,
     pub timestamp: u64,
 }
 
@@ -178,9 +174,9 @@ pub struct Unpaused {
 /// Event emitted when fees are updated
 #[derive(Event, Debug, PartialEq, Eq)]
 pub struct FeesUpdated {
-    pub performance_fee_bps: u16,
-    pub management_fee_bps: u16,
-    pub instant_withdrawal_fee_bps: u16,
+    pub performance_fee_bps: u32,
+    pub management_fee_bps: u32,
+    pub instant_withdrawal_fee_bps: u32,
     pub updated_by: Address,
 }
 
@@ -216,4 +212,19 @@ pub struct BridgeCompleted {
     pub transaction_id: String,
     pub amount: U512,
     pub timestamp: u64,
+}
+
+/// Event emitted when management fees are collected
+#[derive(Event, Debug, PartialEq, Eq)]
+pub struct ManagementFeesCollected {
+    pub amount: U512,
+    pub fee_recipient: Address,
+}
+
+/// Event emitted when funds are rescued from contract
+#[derive(Event, Debug, PartialEq, Eq)]
+pub struct FundsRescued {
+    pub token: Address,
+    pub amount: U512,
+    pub recipient: Address,
 }

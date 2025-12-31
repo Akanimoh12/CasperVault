@@ -75,10 +75,10 @@ pub struct LendingStrategy {
     
     /// Target utilization rate (basis points)
     /// If pool utilization > target, reduce allocation
-    target_utilization_bps: Var<u16>,
+    target_utilization_bps: Var<u32>,
     
     /// Maximum acceptable utilization (basis points)
-    max_utilization_bps: Var<u16>,
+    max_utilization_bps: Var<u32>,
     
     /// Last harvest timestamp
     last_harvest: Var<u64>,
@@ -393,7 +393,7 @@ impl LendingStrategy {
         self.max_capacity.set(capacity);
     }
     
-    pub fn set_utilization_targets(&mut self, target_bps: u16, max_bps: u16) {
+    pub fn set_utilization_targets(&mut self, target_bps: u32, max_bps: u32) {
         self.access_control.only_admin();
         
         if target_bps > 10000 || max_bps > 10000 || max_bps < target_bps {

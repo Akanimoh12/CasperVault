@@ -1,0 +1,94 @@
+{
+  "network": "casper",
+  "node_address": "http://65.21.235.219:7777",
+  "chain_name": "casper",
+  "gas_price": "1",
+  "deploy_gas_limit": "300000000000",
+  "initial_validators": [
+    {
+      "address": "VALIDATOR_ADDRESS_1_REPLACE_BEFORE_MAINNET",
+      "name": "mainnet-validator-1",
+      "commission": 5,
+      "uptime_target": 99
+    },
+    {
+      "address": "VALIDATOR_ADDRESS_2_REPLACE_BEFORE_MAINNET",
+      "name": "mainnet-validator-2",
+      "commission": 5,
+      "uptime_target": 99
+    },
+    {
+      "address": "VALIDATOR_ADDRESS_3_REPLACE_BEFORE_MAINNET",
+      "name": "mainnet-validator-3",
+      "commission": 5,
+      "uptime_target": 99
+    },
+    {
+      "address": "VALIDATOR_ADDRESS_4_REPLACE_BEFORE_MAINNET",
+      "name": "mainnet-validator-4",
+      "commission": 5,
+      "uptime_target": 99
+    },
+    {
+      "address": "VALIDATOR_ADDRESS_5_REPLACE_BEFORE_MAINNET",
+      "name": "mainnet-validator-5",
+      "commission": 5,
+      "uptime_target": 99
+    }
+  ],
+  "treasury_address": "TREASURY_ADDRESS_REPLACE_BEFORE_MAINNET",
+  "admin_keys": [
+    "ADMIN_KEY_1_REPLACE_BEFORE_MAINNET",
+    "ADMIN_KEY_2_REPLACE_BEFORE_MAINNET",
+    "ADMIN_KEY_3_REPLACE_BEFORE_MAINNET",
+    "ADMIN_KEY_4_REPLACE_BEFORE_MAINNET",
+    "ADMIN_KEY_5_REPLACE_BEFORE_MAINNET"
+  ],
+  "operator_keys": [
+    "OPERATOR_KEY_REPLACE_BEFORE_MAINNET"
+  ],
+  "guardian_keys": [
+    "GUARDIAN_KEY_REPLACE_BEFORE_MAINNET"
+  ],
+  "keeper_keys": [
+    "KEEPER_KEY_REPLACE_BEFORE_MAINNET"
+  ],
+  "multisig_config": {
+    "required_signatures": 3,
+    "total_signers": 5,
+    "timelock_duration": 86400
+  },
+  "fees": {
+    "performance_fee_bps": 1000,
+    "management_fee_bps": 200,
+    "instant_withdrawal_fee_bps": 50
+  },
+  "limits": {
+    "max_deposit_per_tx": "10000000000000",
+    "max_deposit_per_day_per_user": "50000000000000",
+    "max_global_deposits_per_hour": "1000000000000000",
+    "max_global_withdrawals_per_hour": "500000000000000"
+  },
+  "strategy_allocations": {
+    "dex": 40,
+    "lending": 30,
+    "crosschain": 30
+  },
+  "compound_config": {
+    "min_threshold_cspr": "100000000000",
+    "min_interval_seconds": 3600,
+    "keeper_reward_bps": 10
+  },
+  "timelock_config": {
+    "withdrawal_timelock_seconds": 604800,
+    "admin_timelock_seconds": 86400,
+    "upgrade_timelock_seconds": 172800
+  },
+  "safety_checks": {
+    "require_audit_report": true,
+    "require_multisig_confirmation": true,
+    "require_timelock": true,
+    "dry_run_first": true,
+    "backup_before_upgrade": true
+  }
+}

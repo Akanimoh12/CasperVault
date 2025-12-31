@@ -103,7 +103,7 @@ pub struct CrossChainStrategy {
     min_bridge_amount: Var<U512>,
     
     /// Bridge fee (basis points)
-    bridge_fee_bps: Var<u16>,
+    bridge_fee_bps: Var<u32>,
     
     /// Simulated target chain APY (basis points)
     target_apy_bps: Var<U256>,
@@ -387,7 +387,7 @@ impl CrossChainStrategy {
         self.max_capacity.set(capacity);
     }
     
-    pub fn set_bridge_fee(&mut self, fee_bps: u16) {
+    pub fn set_bridge_fee(&mut self, fee_bps: u32) {
         self.access_control.only_admin();
         
         // Max 2% bridge fee

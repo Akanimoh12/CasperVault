@@ -1,0 +1,73 @@
+{
+  "network": "casper-test",
+  "node_address": "http://95.216.67.162:7777",
+  "chain_name": "casper-test",
+  "gas_price": "1",
+  "deploy_gas_limit": "300000000000",
+  "initial_validators": [
+    {
+      "address": "01360af61b50cdcb7b92cffe2c99315d413d34ef77fadee0c105cc4f1d4120f986",
+      "name": "validator-1",
+      "commission": 5,
+      "uptime_target": 98
+    },
+    {
+      "address": "0203ca83f49db0c6bb9c45f8467cd2466f6c06840be91f24d42fbc93f93c60ca52",
+      "name": "validator-2",
+      "commission": 5,
+      "uptime_target": 98
+    },
+    {
+      "address": "0203e5def0e8c83552de1e547eff31f08ae45f6fa8a89a33e9cf89f6bb07f71f44",
+      "name": "validator-3",
+      "commission": 5,
+      "uptime_target": 98
+    }
+  ],
+  "treasury_address": "0203a35708e707cd9cbc6160dbd7c42d2ccce12d11db6bb4e77d63e1f47e5c7e6e",
+  "admin_keys": [
+    "0203a35708e707cd9cbc6160dbd7c42d2ccce12d11db6bb4e77d63e1f47e5c7e6e",
+    "0203b45708e707cd9cbc6160dbd7c42d2ccce12d11db6bb4e77d63e1f47e5c7e6f",
+    "0203c55708e707cd9cbc6160dbd7c42d2ccce12d11db6bb4e77d63e1f47e5c7e70"
+  ],
+  "operator_keys": [
+    "0203d65708e707cd9cbc6160dbd7c42d2ccce12d11db6bb4e77d63e1f47e5c7e71"
+  ],
+  "guardian_keys": [
+    "0203e75708e707cd9cbc6160dbd7c42d2ccce12d11db6bb4e77d63e1f47e5c7e72"
+  ],
+  "keeper_keys": [
+    "0203f85708e707cd9cbc6160dbd7c42d2ccce12d11db6bb4e77d63e1f47e5c7e73"
+  ],
+  "multisig_config": {
+    "required_signatures": 3,
+    "total_signers": 5,
+    "timelock_duration": 86400
+  },
+  "fees": {
+    "performance_fee_bps": 1000,
+    "management_fee_bps": 200,
+    "instant_withdrawal_fee_bps": 50
+  },
+  "limits": {
+    "max_deposit_per_tx": "10000000000000",
+    "max_deposit_per_day_per_user": "50000000000000",
+    "max_global_deposits_per_hour": "1000000000000000",
+    "max_global_withdrawals_per_hour": "500000000000000"
+  },
+  "strategy_allocations": {
+    "dex": 40,
+    "lending": 30,
+    "crosschain": 30
+  },
+  "compound_config": {
+    "min_threshold_cspr": "100000000000",
+    "min_interval_seconds": 3600,
+    "keeper_reward_bps": 10
+  },
+  "timelock_config": {
+    "withdrawal_timelock_seconds": 604800,
+    "admin_timelock_seconds": 86400,
+    "upgrade_timelock_seconds": 172800
+  }
+}

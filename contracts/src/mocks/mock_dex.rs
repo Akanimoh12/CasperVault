@@ -14,7 +14,7 @@ pub struct MockDEX {
     exchange_rate: Var<U512>,
     
     /// Slippage percentage (basis points, e.g., 100 = 1%)
-    slippage_bps: Var<u16>,
+    slippage_bps: Var<u32>,
     
     /// Liquidity reserves for token A
     reserve_a: Var<U512>,
@@ -23,7 +23,7 @@ pub struct MockDEX {
     reserve_b: Var<U512>,
     
     /// Trading fee (basis points, e.g., 30 = 0.3%)
-    trading_fee_bps: Var<u16>,
+    trading_fee_bps: Var<u32>,
     
     /// Total fees collected
     fees_collected: Var<U512>,
@@ -196,7 +196,7 @@ impl MockDEX {
     }
     
     /// Admin: Set slippage
-    pub fn set_slippage(&mut self, slippage_bps: u16) {
+    pub fn set_slippage(&mut self, slippage_bps: u32) {
         if slippage_bps > 1000 { // Max 10% slippage
             self.env().revert(VaultError::InvalidFee);
         }
@@ -204,7 +204,7 @@ impl MockDEX {
     }
     
     /// Admin: Set trading fee
-    pub fn set_trading_fee(&mut self, fee_bps: u16) {
+    pub fn set_trading_fee(&mut self, fee_bps: u32) {
         if fee_bps > 1000 { // Max 10% fee
             self.env().revert(VaultError::InvalidFee);
         }

@@ -93,7 +93,7 @@ pub struct DEXStrategy {
     min_deployment: Var<U512>,
     
     /// Maximum slippage allowed (basis points)
-    max_slippage_bps: Var<u16>,
+    max_slippage_bps: Var<u32>,
     
     /// Target APY in basis points
     target_apy_bps: Var<U256>,
@@ -456,7 +456,7 @@ impl DEXStrategy {
     }
     
     /// Update max slippage
-    pub fn set_max_slippage(&mut self, slippage_bps: u16) {
+    pub fn set_max_slippage(&mut self, slippage_bps: u32) {
         self.access_control.only_admin();
         
         // Max 5% slippage
