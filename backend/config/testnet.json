@@ -1,0 +1,67 @@
+{
+  "environment": "testnet",
+  "server": {
+    "port": 3000,
+    "host": "0.0.0.0",
+    "cors": {
+      "origin": ["https://testnet.caspervault.io"],
+      "credentials": true
+    }
+  },
+  "casper": {
+    "network": "casper-test",
+    "rpcUrl": "https://rpc.testnet.casperlabs.io/rpc",
+    "eventStreamUrl": "https://rpc.testnet.casperlabs.io/events",
+    "chainName": "casper-test"
+  },
+  "contracts": {
+    "vaultManager": "",
+    "liquidStaking": "",
+    "strategyRouter": "",
+    "yieldAggregator": "",
+    "cvCsprToken": "",
+    "lstCsprToken": ""
+  },
+  "services": {
+    "optimizer": {
+      "enabled": true,
+      "schedule": "0 */12 * * *",
+      "rebalanceThreshold": 5,
+      "minGainMultiplier": 2,
+      "maxRetries": 3
+    },
+    "compounder": {
+      "enabled": true,
+      "schedule": "0 0 * * *",
+      "minYieldThreshold": "1000000000000",
+      "performanceFeeBps": 1000,
+      "managementFeeBps": 200
+    },
+    "monitor": {
+      "enabled": true,
+      "healthCheckInterval": 300000,
+      "alertWebhook": ""
+    }
+  },
+  "database": {
+    "url": "",
+    "maxConnections": 20
+  },
+  "redis": {
+    "host": "redis",
+    "port": 6379,
+    "password": "",
+    "db": 0
+  },
+  "logging": {
+    "level": "info",
+    "file": true,
+    "console": true,
+    "maxFiles": "30d",
+    "maxSize": "50m"
+  },
+  "rateLimit": {
+    "windowMs": 900000,
+    "maxRequests": 200
+  }
+}
