@@ -586,7 +586,7 @@ export const Landing = () => {
                                 </div>
 
                                 {/* Timeline connector */}
-                                <div className="hidden lg:block absolute left-0 right-0 top-1/2 h-1 bg-gradient-to-r from-green-200 via-primary-200 via-purple-200 to-orange-200 transform -translate-y-1/2 -z-10 mx-auto" style={{ width: 'calc(100% - 16rem)', left: '8rem' }}></div>
+                                <div className="hidden lg:block absolute left-0 right-0 top-1/2 h-1 bg-gradient-to-r from-green-200 via-blue-200 to-orange-200 transform -translate-y-1/2 -z-10 mx-auto" style={{ width: 'calc(100% - 16rem)', left: '8rem' }}></div>
                             </div>
                         </section>
 
