@@ -1,10 +1,8 @@
 import { useState, useCallback } from 'react';
 import { useWalletStore } from '@/store/walletStore';
-import { walletService } from '@/services/wallet';
 
 // Mock vault data - replace with real contract calls
 const MOCK_EXCHANGE_RATE = 1.0; // 1 CSPR = 1 cvCSPR initially
-const MOCK_APY = 0.125; // 12.5%
 
 interface VaultHook {
   deposit: (amount: string) => Promise<any>;

@@ -169,8 +169,9 @@ const ParticleConnections = () => {
 
   return (
     <>
-      {/* @ts-ignore - Three.js JSX elements */}
+      {/* @ts-expect-error - Three.js primitive */}
       <lineSegments ref={ref} geometry={lineGeometry}>
+        {/* @ts-expect-error - Three.js material */}
         <lineBasicMaterial 
           color="#38bdf8" 
           transparent 

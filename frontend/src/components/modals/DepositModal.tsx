@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import { Button } from '../common/Button';
 import { useWalletStore } from '@/store/walletStore';
 import { useVault } from '@/hooks/useVault';
-import { formatCSPR, parseCSPR } from '@/utils/format';
+import { formatCSPR } from '@/utils/format';
 
 interface DepositModalProps {
   isOpen: boolean;
@@ -16,7 +16,7 @@ interface DepositModalProps {
 export const DepositModal = ({ isOpen, onClose }: DepositModalProps) => {
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
-  const { balance, address } = useWalletStore();
+  const { balance } = useWalletStore();
   const { deposit, estimateShares } = useVault();
   
   const handleDeposit = async () => {
@@ -32,7 +32,7 @@ export const DepositModal = ({ isOpen, onClose }: DepositModalProps) => {
     
     setLoading(true);
     try {
-      const tx = await deposit(amount);
+      await deposit(amount);
       toast.success('Deposit successful!');
       onClose();
       setAmount('');
