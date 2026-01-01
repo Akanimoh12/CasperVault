@@ -115,31 +115,31 @@ export const Landing = () => {
             </nav>
 
             {/* Hero Section */}
-            <section className="pt-32 pb-20 px-6">
+            <section className="pt-40 pb-24 px-6">
                 <div className="max-w-7xl mx-auto">
-                    <div className="grid md:grid-cols-2 gap-12 items-center">
+                    <div className="grid md:grid-cols-2 gap-16 items-center">
                         <motion.div
                             initial={{ opacity: 0, y: 30 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.8 }}
-                            className="max-w-3xl"
+                            className="space-y-8 z-10 relative"
                         >
-                            <div className="inline-block px-5 py-2 bg-gradient-to-r from-primary-100 to-accent-100 rounded-full text-base font-semibold text-primary-700 mb-8">
+                            <div className="inline-block px-5 py-2 bg-gradient-to-r from-primary-100 to-accent-100 rounded-full text-base font-semibold text-primary-700">
                                 Built on Casper Network
                             </div>
 
-                            <h1 className="text-6xl md:text-7xl lg:text-8xl font-extrabold leading-[1.1] mb-8">
-                                The Future of
-                                <span className="block bg-gradient-to-r from-primary-600 via-accent-600 to-primary-600 bg-clip-text text-transparent mt-2">
+                            <h1 className="text-6xl md:text-7xl lg:text-8xl font-extrabold leading-[1.1]">
+                                <span className="block text-gray-900">The Future of</span>
+                                <span className="block bg-gradient-to-r from-primary-600 via-accent-600 to-primary-600 bg-clip-text text-transparent">
                                     DeFi Aggregation
                                 </span>
                             </h1>
 
-                            <p className="text-2xl md:text-3xl text-gray-600 mb-12 leading-relaxed font-medium max-w-2xl">
+                            <p className="text-2xl md:text-3xl text-gray-600 leading-relaxed font-medium">
                                 Maximize yields across Casper DeFi with intelligent automation and full control.
                             </p>
 
-                            <div className="flex flex-wrap gap-5">
+                            <div className="flex flex-wrap gap-5 pt-4">
                                 <Link
                                     to="/dashboard"
                                     className="px-10 py-5 bg-gradient-to-r from-primary-500 to-accent-500 text-white rounded-xl hover:shadow-xl hover:scale-105 transition-all duration-200 flex items-center space-x-3 group text-xl font-bold"
@@ -163,8 +163,8 @@ export const Landing = () => {
                             transition={{ duration: 0.8, delay: 0.2 }}
                             className="relative hidden md:block"
                         >
-                            {/* Simple visual element instead of complex card */}
-                            <div className="relative">
+                            {/* Simple visual element */}
+                            <div className="relative z-0">
                                 <div className="w-full h-[500px] bg-gradient-to-br from-primary-50 via-accent-50 to-primary-100 rounded-3xl border-2 border-primary-200 shadow-2xl overflow-hidden">
                                     {/* Decorative gradient orbs */}
                                     <div className="absolute top-20 right-20 w-64 h-64 bg-gradient-to-br from-primary-400 to-accent-400 rounded-full blur-3xl opacity-30 animate-pulse-slow" />
@@ -400,6 +400,195 @@ export const Landing = () => {
                                     </div>
                                 </div>
                             </section>
+
+                        {/* Roadmap Section */}
+                        <section className="py-20 px-6 bg-white">
+                            <div className="max-w-7xl mx-auto">
+                                <motion.div
+                                    initial={{ opacity: 0, y: 20 }}
+                                    whileInView={{ opacity: 1, y: 0 }}
+                                    viewport={{ once: true }}
+                                    transition={{ duration: 0.6 }}
+                                    className="text-center mb-16"
+                                >
+                                    <h2 className="text-5xl md:text-6xl font-extrabold mb-6">
+                                        Product Roadmap
+                                    </h2>
+                                    <p className="text-2xl text-gray-600 font-medium">
+                                        Building the future of automated DeFi, one phase at a time
+                                    </p>
+                                </motion.div>
+
+                                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+                                    {/* Phase 1 - Launch */}
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 30 }}
+                                        whileInView={{ opacity: 1, y: 0 }}
+                                        viewport={{ once: true }}
+                                        transition={{ duration: 0.6, delay: 0.1 }}
+                                        className="relative"
+                                    >
+                                        <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl p-8 border-2 border-green-200 hover:border-green-300 transition-all duration-300 hover:shadow-xl h-full">
+                                            <div className="flex items-center justify-between mb-6">
+                                                <span className="text-sm font-bold text-green-600 uppercase tracking-wide">Phase 1</span>
+                                                <div className="flex items-center space-x-1.5 bg-green-600 text-white px-3 py-1 rounded-full text-xs font-bold">
+                                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                    </svg>
+                                                    <span>Completed</span>
+                                                </div>
+                                            </div>
+                                            <h3 className="text-2xl font-extrabold text-gray-900 mb-4">Launch</h3>
+                                            <ul className="space-y-3 text-base text-gray-700 font-medium">
+                                                <li className="flex items-start space-x-2">
+                                                    <svg className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                    </svg>
+                                                    <span>Smart contracts on Testnet</span>
+                                                </li>
+                                                <li className="flex items-start space-x-2">
+                                                    <svg className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                    </svg>
+                                                    <span>Core vault functionality</span>
+                                                </li>
+                                                <li className="flex items-start space-x-2">
+                                                    <svg className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                    </svg>
+                                                    <span>Strategy allocation system</span>
+                                                </li>
+                                                <li className="flex items-start space-x-2">
+                                                    <svg className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                    </svg>
+                                                    <span>Dashboard with wallet</span>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </motion.div>
+
+                                    {/* Phase 2 - Automation */}
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 30 }}
+                                        whileInView={{ opacity: 1, y: 0 }}
+                                        viewport={{ once: true }}
+                                        transition={{ duration: 0.6, delay: 0.2 }}
+                                        className="relative"
+                                    >
+                                        <div className="bg-gradient-to-br from-blue-50 to-primary-50 rounded-2xl p-8 border-2 border-primary-300 hover:border-primary-400 transition-all duration-300 hover:shadow-xl h-full">
+                                            <div className="flex items-center justify-between mb-6">
+                                                <span className="text-sm font-bold text-primary-600 uppercase tracking-wide">Phase 2</span>
+                                                <div className="flex items-center space-x-1.5 bg-primary-600 text-white px-3 py-1 rounded-full text-xs font-bold animate-pulse">
+                                                    <div className="w-2 h-2 bg-white rounded-full"></div>
+                                                    <span>Current</span>
+                                                </div>
+                                            </div>
+                                            <h3 className="text-2xl font-extrabold text-gray-900 mb-4">Automation</h3>
+                                            <ul className="space-y-3 text-base text-gray-700 font-medium">
+                                                <li className="flex items-start space-x-2">
+                                                    <svg className="w-5 h-5 text-primary-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                    </svg>
+                                                    <span>AI-powered optimizer bot</span>
+                                                </li>
+                                                <li className="flex items-start space-x-2">
+                                                    <svg className="w-5 h-5 text-primary-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                    </svg>
+                                                    <span>Auto-compounding engine</span>
+                                                </li>
+                                                <li className="flex items-start space-x-2">
+                                                    <svg className="w-5 h-5 text-primary-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                    </svg>
+                                                    <span>Real-time WebSocket updates</span>
+                                                </li>
+                                                <li className="flex items-start space-x-2">
+                                                    <svg className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" />
+                                                    </svg>
+                                                    <span className="text-gray-500">Advanced analytics</span>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </motion.div>
+
+                                    {/* Phase 3 - Expansion */}
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 30 }}
+                                        whileInView={{ opacity: 1, y: 0 }}
+                                        viewport={{ once: true }}
+                                        transition={{ duration: 0.6, delay: 0.3 }}
+                                        className="relative"
+                                    >
+                                        <div className="bg-gradient-to-br from-purple-50 to-accent-50 rounded-2xl p-8 border-2 border-purple-200 hover:border-purple-300 transition-all duration-300 hover:shadow-xl h-full">
+                                            <div className="flex items-center justify-between mb-6">
+                                                <span className="text-sm font-bold text-purple-600 uppercase tracking-wide">Phase 3</span>
+                                                <span className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-xs font-bold">Q1 2026</span>
+                                            </div>
+                                            <h3 className="text-2xl font-extrabold text-gray-900 mb-4">Expansion</h3>
+                                            <ul className="space-y-3 text-base text-gray-700 font-medium">
+                                                <li className="flex items-start space-x-2">
+                                                    <FiArrowRight className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
+                                                    <span>Mainnet launch</span>
+                                                </li>
+                                                <li className="flex items-start space-x-2">
+                                                    <FiArrowRight className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
+                                                    <span>5+ new yield strategies</span>
+                                                </li>
+                                                <li className="flex items-start space-x-2">
+                                                    <FiArrowRight className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
+                                                    <span>Ethereum & BSC bridges</span>
+                                                </li>
+                                                <li className="flex items-start space-x-2">
+                                                    <FiArrowRight className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
+                                                    <span>Governance token (cvToken)</span>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </motion.div>
+
+                                    {/* Phase 4 - Scale */}
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 30 }}
+                                        whileInView={{ opacity: 1, y: 0 }}
+                                        viewport={{ once: true }}
+                                        transition={{ duration: 0.6, delay: 0.4 }}
+                                        className="relative"
+                                    >
+                                        <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-2xl p-8 border-2 border-orange-200 hover:border-orange-300 transition-all duration-300 hover:shadow-xl h-full">
+                                            <div className="flex items-center justify-between mb-6">
+                                                <span className="text-sm font-bold text-orange-600 uppercase tracking-wide">Phase 4</span>
+                                                <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-bold">Q2 2026</span>
+                                            </div>
+                                            <h3 className="text-2xl font-extrabold text-gray-900 mb-4">Scale</h3>
+                                            <ul className="space-y-3 text-base text-gray-700 font-medium">
+                                                <li className="flex items-start space-x-2">
+                                                    <FiTrendingUp className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" />
+                                                    <span>Institutional vaults</span>
+                                                </li>
+                                                <li className="flex items-start space-x-2">
+                                                    <FiTrendingUp className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" />
+                                                    <span>API for integrations</span>
+                                                </li>
+                                                <li className="flex items-start space-x-2">
+                                                    <FiTrendingUp className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" />
+                                                    <span>Advanced AI models</span>
+                                                </li>
+                                                <li className="flex items-start space-x-2">
+                                                    <FiTrendingUp className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" />
+                                                    <span>Multi-chain expansion</span>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </motion.div>
+                                </div>
+
+                                {/* Timeline connector */}
+                                <div className="hidden lg:block absolute left-0 right-0 top-1/2 h-1 bg-gradient-to-r from-green-200 via-primary-200 via-purple-200 to-orange-200 transform -translate-y-1/2 -z-10 mx-auto" style={{ width: 'calc(100% - 16rem)', left: '8rem' }}></div>
+                            </div>
+                        </section>
 
                         {/* CTA Section */}
                         <section className="py-20 px-6">
