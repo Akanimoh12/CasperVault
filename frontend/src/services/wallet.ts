@@ -1,4 +1,4 @@
-import { CasperClient, CLPublicKey, DeployUtil } from 'casper-js-sdk';
+import { CasperClient, CLPublicKey, DeployUtil, CasperServiceByJsonRPC } from 'casper-js-sdk';
 import { CASPER_RPC_URL } from '@/utils/constants';
 
 // Helper to get the wallet provider
@@ -18,11 +18,14 @@ function getWalletProvider() {
 
 class WalletService {
   private casperClient: CasperClient;
+  private rpcService: CasperServiceByJsonRPC;
   private activePublicKey: string | null = null;
   private walletProvider: any = null;
 
   constructor() {
+    console.log('🔧 Initializing Casper Wallet Service with RPC:', CASPER_RPC_URL);
     this.casperClient = new CasperClient(CASPER_RPC_URL);
+    this.rpcService = new CasperServiceByJsonRPC(CASPER_RPC_URL);
   }
 
   async connect(): Promise<{ address: string; balance: string }> {
@@ -87,18 +90,69 @@ class WalletService {
   }
 
   async getBalance(publicKeyHex: string): Promise<string> {
+    console.log('🔍 Fetching balance for:', publicKeyHex);
+    console.log('🌐 Using RPC URL:', CASPER_RPC_URL);
+    
     try {
       const publicKey = CLPublicKey.fromHex(publicKeyHex);
-      const balanceUref = await this.casperClient.balanceOfByPublicKey(publicKey);
+      console.log('✅ Parsed public key successfully');
       
-      // Convert motes to CSPR (1 CSPR = 1,000,000,000 motes)
-      const balanceInCSPR = balanceUref.toString() 
-        ? (BigInt(balanceUref.toString()) / BigInt(1_000_000_000)).toString()
-        : '0';
+      // Method 1: Try using CasperServiceByJsonRPC directly for state root hash
+      const latestBlock = await this.rpcService.getLatestBlockInfo();
+      console.log('📦 Latest block info:', latestBlock?.block?.header?.height);
       
-      return balanceInCSPR;
+      if (!latestBlock?.block?.header?.state_root_hash) {
+        console.error('❌ Could not get state root hash from latest block');
+        return '0';
+      }
+      
+      const stateRootHash = latestBlock.block.header.state_root_hash;
+      console.log('🔑 State root hash:', stateRootHash);
+      
+      // Get account hash
+      const accountHash = publicKey.toAccountHashStr();
+      console.log('👤 Account hash:', accountHash);
+      
+      // Query the balance using getAccountBalance
+      try {
+        const balanceUref = await this.rpcService.getAccountBalanceUrefByPublicKey(
+          stateRootHash,
+          publicKey
+        );
+        console.log('💰 Balance URef:', balanceUref);
+        
+        if (balanceUref) {
+          const balance = await this.rpcService.getAccountBalance(stateRootHash, balanceUref);
+          console.log('💵 Raw balance (motes):', balance?.toString());
+          
+          if (balance) {
+            // Convert motes to CSPR (1 CSPR = 1,000,000,000 motes)
+            const balanceInCSPR = (BigInt(balance.toString()) / BigInt(1_000_000_000)).toString();
+            console.log('✅ Balance in CSPR:', balanceInCSPR);
+            return balanceInCSPR;
+          }
+        }
+      } catch (balanceError) {
+        console.warn('⚠️ Could not get balance via URef method:', balanceError);
+      }
+      
+      // Fallback: Try direct method
+      try {
+        const balance = await this.casperClient.balanceOfByPublicKey(publicKey);
+        console.log('💵 Fallback balance (motes):', balance?.toString());
+        
+        if (balance) {
+          const balanceInCSPR = (BigInt(balance.toString()) / BigInt(1_000_000_000)).toString();
+          console.log('✅ Fallback balance in CSPR:', balanceInCSPR);
+          return balanceInCSPR;
+        }
+      } catch (fallbackError) {
+        console.warn('⚠️ Fallback balance method failed:', fallbackError);
+      }
+      
+      return '0';
     } catch (error) {
-      console.error('Failed to fetch balance:', error);
+      console.error('❌ Failed to fetch balance:', error);
       return '0';
     }
   }

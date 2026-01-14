@@ -12,7 +12,8 @@ interface WalletState {
 
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
-  updateBalance: (balance: string) => void;
+  updateBalance: (balance?: string) => void;
+  refreshBalance: () => Promise<void>;
   reconnect: () => Promise<void>;
 }
 
@@ -102,6 +103,23 @@ export const useWalletStore = create<WalletState>()(
           set({ balance });
         } catch (error) {
           console.error('Failed to update balance:', error);
+        }
+      },
+
+      refreshBalance: async () => {
+        const { address } = get();
+        
+        if (!address) {
+          return;
+        }
+
+        try {
+          console.log('🔄 Refreshing wallet balance...');
+          const balance = await walletService.getBalance(address);
+          set({ balance });
+          console.log('✅ Balance updated:', balance, 'CSPR');
+        } catch (error) {
+          console.error('Failed to refresh balance:', error);
         }
       },
 

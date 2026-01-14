@@ -1,8 +1,10 @@
 import { useState, useCallback } from 'react';
 import { useWalletStore } from '@/store/walletStore';
+import { contractService } from '@/services/contractService';
+import { VAULT_CONTRACT_HASH } from '@/utils/constants';
 
-// Mock vault data - replace with real contract calls
-const MOCK_EXCHANGE_RATE = 1.0; // 1 CSPR = 1 cvCSPR initially
+// Exchange rate - in real implementation, fetch from contract
+const EXCHANGE_RATE = 1.0; // 1 CSPR = 1 cvCSPR initially
 
 interface VaultHook {
   deposit: (amount: string) => Promise<any>;
@@ -11,157 +13,166 @@ interface VaultHook {
   estimateShares: (amount: string) => string;
   estimateCSPR: (shares: string) => string;
   loading: boolean;
+  isContractReady: boolean;
 }
 
 export const useVault = (): VaultHook => {
   const [loading, setLoading] = useState(false);
-  const { address } = useWalletStore();
+  const { address, refreshBalance } = useWalletStore();
+  
+  // Check if contract is configured
+  const isContractReady = Boolean(VAULT_CONTRACT_HASH);
 
   /**
-   * Deposit CSPR and receive cvCSPR shares
+   * Deposit CSPR into the vault - REAL CONTRACT CALL
    */
   const deposit = useCallback(async (amount: string): Promise<any> => {
     if (!address) {
       throw new Error('Wallet not connected');
     }
 
+    if (!isContractReady) {
+      throw new Error('Contract not configured. Please set VITE_VAULT_CONTRACT_HASH');
+    }
+
     setLoading(true);
     try {
-      // TODO: Replace with real contract call
-      // Example with Casper contract:
-      // const deploy = await createDepositDeploy(address, amount);
-      // const signedDeploy = await walletService.signTransaction(deploy);
-      // const deployHash = await submitDeploy(signedDeploy);
+      console.log('📥 Initiating deposit to CasperVault contract...');
       
-      // Mock transaction for now
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Real contract call
+      const result = await contractService.deposit(address, amount);
       
-      console.log('Deposit initiated:', {
-        address,
-        amount,
-        shares: estimateShares(amount),
-      });
+      console.log('✅ Deposit transaction submitted:', result);
+      
+      // Refresh wallet balance after a short delay
+      setTimeout(() => {
+        refreshBalance?.();
+      }, 5000);
       
       return {
-        deployHash: '0x' + Math.random().toString(16).slice(2),
-        amount,
+        deployHash: result.deployHash,
+        amount: result.amount,
         shares: estimateShares(amount),
       };
     } catch (error) {
-      console.error('Deposit failed:', error);
+      console.error('❌ Deposit failed:', error);
       throw error;
     } finally {
       setLoading(false);
     }
-  }, [address]);
+  }, [address, isContractReady, refreshBalance]);
 
   /**
-   * Withdraw cvCSPR shares (7-day unlock period)
+   * Withdraw CSPR from the vault - REAL CONTRACT CALL
    */
   const withdraw = useCallback(async (shares: string): Promise<any> => {
     if (!address) {
       throw new Error('Wallet not connected');
     }
 
+    if (!isContractReady) {
+      throw new Error('Contract not configured');
+    }
+
     setLoading(true);
     try {
-      // TODO: Replace with real contract call
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      console.log('📤 Initiating withdrawal from CasperVault contract...');
       
-      console.log('Withdrawal initiated:', {
-        address,
-        shares,
-        cspr: estimateCSPR(shares),
-        unlockTime: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
-      });
+      const cspr = estimateCSPR(shares);
+      
+      // Real contract call
+      const result = await contractService.withdraw(address, cspr);
+      
+      console.log('✅ Withdrawal transaction submitted:', result);
+      
+      // Refresh balance after delay
+      setTimeout(() => {
+        refreshBalance?.();
+      }, 5000);
       
       return {
-        deployHash: '0x' + Math.random().toString(16).slice(2),
+        deployHash: result.deployHash,
         shares,
-        cspr: estimateCSPR(shares),
-        unlockTime: Date.now() + 7 * 24 * 60 * 60 * 1000,
+        cspr: result.amount,
+        unlockTime: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days for standard withdraw
       };
     } catch (error) {
-      console.error('Withdrawal failed:', error);
+      console.error('❌ Withdrawal failed:', error);
       throw error;
     } finally {
       setLoading(false);
     }
-  }, [address]);
+  }, [address, isContractReady, refreshBalance]);
 
   /**
-   * Instant withdraw with 0.5% fee
+   * Instant withdraw with 0.5% fee - REAL CONTRACT CALL
    */
   const instantWithdraw = useCallback(async (shares: string): Promise<any> => {
     if (!address) {
       throw new Error('Wallet not connected');
     }
 
+    if (!isContractReady) {
+      throw new Error('Contract not configured');
+    }
+
     setLoading(true);
     try {
-      // TODO: Replace with real contract call
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      console.log('⚡ Initiating instant withdrawal...');
       
       const cspr = parseFloat(estimateCSPR(shares));
       const fee = cspr * 0.005; // 0.5% fee
       const finalAmount = cspr - fee;
       
-      console.log('Instant withdrawal:', {
-        address,
-        shares,
-        cspr: finalAmount,
-        fee,
-      });
+      // Real contract call (using withdraw for now, fee handled in contract)
+      const result = await contractService.withdraw(address, finalAmount.toString());
+      
+      console.log('✅ Instant withdrawal submitted:', result);
+      
+      setTimeout(() => {
+        refreshBalance?.();
+      }, 5000);
       
       return {
-        deployHash: '0x' + Math.random().toString(16).slice(2),
+        deployHash: result.deployHash,
         shares,
         cspr: finalAmount.toString(),
         fee: fee.toString(),
       };
     } catch (error) {
-      console.error('Instant withdrawal failed:', error);
+      console.error('❌ Instant withdrawal failed:', error);
       throw error;
     } finally {
       setLoading(false);
     }
-  }, [address]);
+  }, [address, isContractReady, refreshBalance]);
 
   /**
    * Estimate cvCSPR shares from CSPR amount
-   * Formula: shares = amount * exchangeRate
    */
   const estimateShares = useCallback((amount: string): string => {
     try {
       const cspr = parseFloat(amount);
       if (isNaN(cspr) || cspr <= 0) return '0';
       
-      // TODO: Fetch real exchange rate from contract
-      // const rate = await getExchangeRate();
-      const shares = cspr * MOCK_EXCHANGE_RATE;
-      
-      return shares.toFixed(2);
-    } catch (error) {
-      console.error('Failed to estimate shares:', error);
+      const shares = cspr * EXCHANGE_RATE;
+      return shares.toFixed(4);
+    } catch {
       return '0';
     }
   }, []);
 
   /**
    * Estimate CSPR amount from cvCSPR shares
-   * Formula: cspr = shares / exchangeRate
    */
   const estimateCSPR = useCallback((shares: string): string => {
     try {
       const cvCSPR = parseFloat(shares);
       if (isNaN(cvCSPR) || cvCSPR <= 0) return '0';
       
-      // TODO: Fetch real exchange rate from contract
-      const cspr = cvCSPR / MOCK_EXCHANGE_RATE;
-      
-      return cspr.toFixed(2);
-    } catch (error) {
-      console.error('Failed to estimate CSPR:', error);
+      const cspr = cvCSPR / EXCHANGE_RATE;
+      return cspr.toFixed(4);
+    } catch {
       return '0';
     }
   }, []);
@@ -173,5 +184,6 @@ export const useVault = (): VaultHook => {
     estimateShares,
     estimateCSPR,
     loading,
+    isContractReady,
   };
 };

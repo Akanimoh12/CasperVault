@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
-import { MdClose, MdInfo } from 'react-icons/md';
+import { MdClose, MdInfo, MdWarning } from 'react-icons/md';
 import toast from 'react-hot-toast';
 import { Button } from '../common/Button';
 import { useWalletStore } from '@/store/walletStore';
@@ -16,8 +16,9 @@ interface DepositModalProps {
 export const DepositModal = ({ isOpen, onClose }: DepositModalProps) => {
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
+  const [txHash, setTxHash] = useState<string | null>(null);
   const { balance } = useWalletStore();
-  const { deposit, estimateShares } = useVault();
+  const { deposit, estimateShares, isContractReady } = useVault();
   
   const handleDeposit = async () => {
     if (!amount || parseFloat(amount) <= 0) {
@@ -29,15 +30,28 @@ export const DepositModal = ({ isOpen, onClose }: DepositModalProps) => {
       toast.error('Insufficient balance');
       return;
     }
+
+    if (parseFloat(amount) < 10) {
+      toast.error('Minimum deposit is 10 CSPR');
+      return;
+    }
     
     setLoading(true);
+    setTxHash(null);
     try {
-      await deposit(amount);
-      toast.success('Deposit successful!');
-      onClose();
+      const result = await deposit(amount);
+      setTxHash(result.deployHash);
+      toast.success(
+        <div>
+          <p className="font-semibold">Deposit submitted!</p>
+          <p className="text-sm">Transaction is being processed...</p>
+        </div>
+      );
       setAmount('');
-    } catch (error) {
-      toast.error('Deposit failed');
+      // Don't close immediately - show the transaction link
+    } catch (error: any) {
+      const errorMsg = error?.message || 'Deposit failed';
+      toast.error(errorMsg);
       console.error(error);
     } finally {
       setLoading(false);
@@ -45,9 +59,9 @@ export const DepositModal = ({ isOpen, onClose }: DepositModalProps) => {
   };
   
   const maxAmount = () => {
-    // Leave 1 CSPR for gas
-    const max = Math.max(0, parseFloat(balance) - 1);
-    setAmount(max.toString());
+    // Leave 5 CSPR for gas (3 CSPR gas + 2 CSPR buffer)
+    const max = Math.max(0, parseFloat(balance) - 5);
+    setAmount(max.toFixed(2));
   };
   
   const estimatedShares = estimateShares(amount || '0');
@@ -143,9 +157,41 @@ export const DepositModal = ({ isOpen, onClose }: DepositModalProps) => {
                   
                   <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50">
                     <span className="text-sm text-gray-600">Est. Gas Fee</span>
-                    <span className="font-semibold text-gray-900">~0.5 CSPR</span>
+                    <span className="font-semibold text-gray-900">~3 CSPR</span>
                   </div>
                 </div>
+
+                {/* Transaction Success */}
+                {txHash && (
+                  <div className="flex gap-3 p-4 rounded-xl bg-green-50 border border-green-200 mb-6">
+                    <MdInfo className="text-xl text-green-500 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm text-green-900">
+                      <p className="font-semibold mb-1">✅ Transaction Submitted!</p>
+                      <a
+                        href={`https://testnet.cspr.live/deploy/${txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-green-700 underline hover:text-green-800"
+                      >
+                        View on Explorer →
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {/* Contract Not Ready Warning */}
+                {!isContractReady && (
+                  <div className="flex gap-3 p-4 rounded-xl bg-yellow-50 border border-yellow-200 mb-6">
+                    <MdWarning className="text-xl text-yellow-500 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm text-yellow-900">
+                      <p className="font-semibold mb-1">Contract Not Deployed</p>
+                      <p>
+                        The vault contract is not yet deployed on testnet. 
+                        Transactions will be simulated for demo purposes.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 
                 {/* Info Banner */}
                 <div className="flex gap-3 p-4 rounded-xl bg-blue-50 border border-blue-200 mb-6">
@@ -163,20 +209,22 @@ export const DepositModal = ({ isOpen, onClose }: DepositModalProps) => {
                 <div className="flex gap-3">
                   <Button
                     variant="secondary"
-                    onClick={onClose}
+                    onClick={() => { setTxHash(null); onClose(); }}
                     className="flex-1"
                   >
-                    Cancel
+                    {txHash ? 'Close' : 'Cancel'}
                   </Button>
-                  <Button
-                    variant="primary"
-                    onClick={handleDeposit}
-                    loading={loading}
-                    disabled={!amount || parseFloat(amount) <= 0}
-                    className="flex-1"
-                  >
-                    Deposit
-                  </Button>
+                  {!txHash && (
+                    <Button
+                      variant="primary"
+                      onClick={handleDeposit}
+                      loading={loading}
+                      disabled={!amount || parseFloat(amount) <= 0}
+                      className="flex-1"
+                    >
+                      Deposit
+                    </Button>
+                  )}
                 </div>
               </Dialog.Panel>
             </Transition.Child>

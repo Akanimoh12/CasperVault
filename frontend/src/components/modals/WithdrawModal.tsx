@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
-import { MdClose, MdWarning } from 'react-icons/md';
+import { MdClose, MdWarning, MdInfo } from 'react-icons/md';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { Button } from '../common/Button';
@@ -18,7 +18,8 @@ export const WithdrawModal = ({ isOpen, onClose, cvCSPRBalance }: WithdrawModalP
   const [amount, setAmount] = useState('');
   const [instant, setInstant] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { withdraw, instantWithdraw, estimateCSPR } = useVault();
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const { withdraw, instantWithdraw, estimateCSPR, isContractReady } = useVault();
   
   const handleWithdraw = async () => {
     if (!amount || parseFloat(amount) <= 0) {
@@ -32,18 +33,31 @@ export const WithdrawModal = ({ isOpen, onClose, cvCSPRBalance }: WithdrawModalP
     }
     
     setLoading(true);
+    setTxHash(null);
     try {
+      let result;
       if (instant) {
-        await instantWithdraw(amount);
-        toast.success('Instant withdrawal successful!');
+        result = await instantWithdraw(amount);
+        toast.success(
+          <div>
+            <p className="font-semibold">Instant withdrawal submitted!</p>
+            <p className="text-sm">Funds will be available shortly.</p>
+          </div>
+        );
       } else {
-        await withdraw(amount);
-        toast.success('Withdrawal initiated. Unlocking in 7 days.');
+        result = await withdraw(amount);
+        toast.success(
+          <div>
+            <p className="font-semibold">Withdrawal initiated!</p>
+            <p className="text-sm">Unlocking in 7 days.</p>
+          </div>
+        );
       }
-      onClose();
+      setTxHash(result.deployHash);
       setAmount('');
-    } catch (error) {
-      toast.error('Withdrawal failed');
+    } catch (error: any) {
+      const errorMsg = error?.message || 'Withdrawal failed';
+      toast.error(errorMsg);
       console.error(error);
     } finally {
       setLoading(false);
@@ -187,7 +201,7 @@ export const WithdrawModal = ({ isOpen, onClose, cvCSPRBalance }: WithdrawModalP
                 </div>
                 
                 {/* Warning for standard withdrawal */}
-                {!instant && (
+                {!instant && !txHash && (
                   <div className="flex gap-3 p-4 rounded-xl bg-warning-50 border border-warning-200 mb-6">
                     <MdWarning className="text-xl text-warning-500 flex-shrink-0 mt-0.5" />
                     <div className="text-sm text-warning-900">
@@ -199,25 +213,58 @@ export const WithdrawModal = ({ isOpen, onClose, cvCSPRBalance }: WithdrawModalP
                     </div>
                   </div>
                 )}
+
+                {/* Transaction Success */}
+                {txHash && (
+                  <div className="flex gap-3 p-4 rounded-xl bg-green-50 border border-green-200 mb-6">
+                    <MdInfo className="text-xl text-green-500 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm text-green-900">
+                      <p className="font-semibold mb-1">✅ Withdrawal Submitted!</p>
+                      <a
+                        href={`https://testnet.cspr.live/deploy/${txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-green-700 underline hover:text-green-800"
+                      >
+                        View on Explorer →
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {/* Contract Not Ready Warning */}
+                {!isContractReady && !txHash && (
+                  <div className="flex gap-3 p-4 rounded-xl bg-yellow-50 border border-yellow-200 mb-6">
+                    <MdWarning className="text-xl text-yellow-500 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm text-yellow-900">
+                      <p className="font-semibold mb-1">Contract Not Deployed</p>
+                      <p>
+                        Transactions will be simulated for demo purposes.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 
                 {/* Action Buttons */}
                 <div className="flex gap-3">
                   <Button
                     variant="secondary"
-                    onClick={onClose}
+                    onClick={() => { setTxHash(null); onClose(); }}
                     className="flex-1"
                   >
-                    Cancel
+                    {txHash ? 'Close' : 'Cancel'}
                   </Button>
-                  <Button
-                    variant="primary"
-                    onClick={handleWithdraw}
-                    loading={loading}
-                    disabled={!amount || parseFloat(amount) <= 0}
-                    className="flex-1"
-                  >
-                    {instant ? 'Withdraw Now' : 'Start Unlock'}
-                  </Button>
+                  {!txHash && (
+                    <Button
+                      variant="primary"
+                      onClick={handleWithdraw}
+                      loading={loading}
+                      disabled={!amount || parseFloat(amount) <= 0}
+                      className="flex-1"
+                    >
+                      {instant ? 'Withdraw Now' : 'Start Unlock'}
+                    </Button>
+                  )}
                 </div>
               </Dialog.Panel>
             </Transition.Child>
